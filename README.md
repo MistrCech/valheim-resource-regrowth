@@ -8,6 +8,8 @@ It brings one-time world content back once an area has been left alone for a whi
 - **One-time creature spawners** (dungeons, camps, caves) spawn their creature again.
 - **Terrain** that players dug, raised, levelled or paved slowly returns to the land's own shape,
   except around player bases and wards.
+- **Location objects** (off by default): destroyed objects a location or village generated -- wild
+  **beehives** in abandoned houses, for example -- are put back exactly where they stood.
 
 Players need nothing: vanilla clients work. The plugin depends on BepInEx and nothing else,
 and it patches no game code.
@@ -23,6 +25,20 @@ the object's data. The plugin deletes and creates no objects.
 | Treasure chest | vanilla filled it once and it is now empty | filling it from the chest's own loot table, as vanilla does when the chest is first generated |
 | One-time spawner | its creature is gone | clearing the spawned link; vanilla spawns again the next time a player loads the area |
 | Terrain (a zone's `_TerrainCompiler`) | any vertex of the zone's heightmap is modified or painted | a step every `StepHours`: every height change outside a protected area is divided by `Divider` (1.7) and dropped once below `MinDelta`; paint goes back to nothing once the height under it is back, except paved and cultivated ground. The data is written in the game's own format; loaded terrain reloads it and every client rebuilds the ground. |
+
+Location objects are the one exception to "no object is created": a destroyed beehive is gone from the
+world, so it is created again. Where it stood is known exactly, not guessed:
+
+- every location the world generated keeps a record of its position, rotation and seed, and every
+  village or camp keeps the position and rotation of each of its buildings;
+- the object's place follows from the location's or building's layout, the way the game placed it;
+- objects that only spawn by chance are decided by replaying the game's own roll from that seed, so
+  only places that really had one count.
+
+Checked on a live world: of 169 beehive places the replay said 47 had a hive, and all 29 hives still
+standing were on exactly those places (same height to the centimetre), none anywhere else.
+A hive hangs under the roof of its house; when the pieces of the house that held it are gone
+(pulled down by players), the hive is not put back, so nothing floats in the air.
 
 Every `CheckIntervalMinutes` the plugin scans the world. An object is regrown only when all of these hold:
 
@@ -71,6 +87,10 @@ every world load.
   exists. The creature appears once they reconnect. With Dedicated Simulation the server owns these
   objects, so this does not happen there.
 - A core stand or chest that some machine currently has loaded is left for a later pass.
+- Location objects: the first scan after a start reads the layouts of the locations and village
+  buildings the world has (a few hundred prefabs, loaded in the background through the game's own
+  loader: measured about 0.3 s of work over 45 s, no frame over 100 ms); later scans only read new ones. A location
+  object's own zone must not be loaded, like everything else.
 
 ## Install
 
@@ -99,6 +119,8 @@ applied at startup.
 | TreasureChests | ExcludePrefabs | | chest prefabs never to refill, e.g. `TreasureChest_meadows_buried` |
 | DungeonMonsters | Enabled / AfterHours | true / 24 | |
 | DungeonMonsters | ExcludePrefabs | | spawner prefabs never to reset |
+| LocationObjects | Enabled / AfterHours | false / 48 | put back destroyed objects of locations and villages (needs a restart) |
+| LocationObjects | Prefabs | Beehive | which ones; only world-generated objects are ever put back |
 
 ## Build
 

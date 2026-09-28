@@ -32,6 +32,10 @@ namespace ResourceRegrowth
 		public readonly ConfigEntry<float> SpawnersAfterHours;
 		public readonly ConfigEntry<string> SpawnersExclude;
 
+		public readonly ConfigEntry<bool> LocationObjectsEnabled;
+		public readonly ConfigEntry<float> LocationObjectsAfterHours;
+		public readonly ConfigEntry<string> LocationObjectsPrefabs;
+
 		public readonly ConfigEntry<bool> TerrainEnabled;
 		public readonly ConfigEntry<float> TerrainAfterHours;
 		public readonly ConfigEntry<float> TerrainStepHours;
@@ -80,6 +84,13 @@ namespace ResourceRegrowth
 				"Real hours after the plugin first saw the spawner's creature gone.");
 			SpawnersExclude = config.Bind("DungeonMonsters", "ExcludePrefabs", "",
 				"Spawner prefabs never to reset. Comma separated.");
+
+			LocationObjectsEnabled = config.Bind("LocationObjects", "Enabled", false,
+				"Put destroyed objects that a location or a village generated back where they stood -- wild beehives, for example. Unlike everything else here this creates objects, so it is off until switched on. Needs a restart.");
+			LocationObjectsAfterHours = config.Bind("LocationObjects", "AfterHours", 48f,
+				"Real hours after the plugin first saw the object missing.");
+			LocationObjectsPrefabs = config.Bind("LocationObjects", "Prefabs", "Beehive",
+				"Prefabs to put back. Only objects the world itself generated in a location or village room are ever recreated, never player-built ones. Comma separated. Needs a restart.");
 
 			TerrainEnabled = config.Bind("Terrain", "Enabled", true,
 				"Let dug, raised, levelled and paved ground slowly return to the land's own shape once the area has been left alone. Ground around a player base (anything the game counts as a base: workbench, forge, stonecutter ... and wards) is left as it is; when the base is gone, so is the protection.");

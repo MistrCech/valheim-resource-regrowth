@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.5.0] - 2026-09-28
+
+### Added
+
+- `[LocationObjects]` (off by default): destroyed objects that a location or a village generated
+  are put back where they stood -- `Prefabs` = `Beehive`, the wild beehives of abandoned houses, bear
+  caves, ruined towers and meadow villages. Unlike the other categories this creates objects. The
+  place is exact: every generated location leaves a proxy with its position, rotation and seed, and
+  every village or camp generator keeps its buildings' positions and rotations; objects that spawn
+  by chance are decided by replaying the game's roll from that seed. Checked on a copy of the live
+  world: 169 hive places, 47 of them with a hive by the replay, all 29 standing hives on those
+  places (0.00 m apart in height too) and none elsewhere. Of the 18 missing, 14 would be put back,
+  3 lie near player builds and 1 has lost the house that held it -- such a hive is not put back, so
+  nothing hangs in the air (pulling down another house for the test kept that one out too). The
+  put-back hives survived a
+  restart and the server instantiated them where the originals hang, 4.08 m above the floor under
+  the roof. Same rules as the rest: `AfterHours` (48) since first seen missing, `IdleHours`,
+  `PlayerBuildRadius`, and the zone must not be loaded.
+- The first scan after a start reads the layouts of the world's locations and village buildings
+  through the game's own asynchronous loader: about 0.3 s of work over 45 s, no frame over 100 ms
+  (loading them directly cost 9.9 s and frames up to 440 ms). Later scans only read new ones.
+
 ## [0.4.0] - 2026-09-13
 
 ### Added
