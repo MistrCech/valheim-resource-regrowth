@@ -99,7 +99,7 @@ namespace ResourceRegrowth
 		{
 			List<string> lines = new List<string>
 			{
-				"# Sarkastic.eu Resource Regrowth state. Real time, UTC. Edit only while the server is stopped.",
+				"# Sarkastic.gg Resource Regrowth state. Real time, UTC. Edit only while the server is stopped.",
 				"firstrun " + Format(FirstRun),
 			};
 			foreach (KeyValuePair<Vector2s, DateTime> zone in lastSeen)

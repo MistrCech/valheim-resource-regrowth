@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.1] - 2026-10-07
+
+### Changed
+
+- Renamed to Sarkastic.gg Resource Regrowth: the community moved from sarkastic.eu to sarkastic.gg.
+  The DLL is now `SarkasticGG_Resource_Regrowth.dll`; delete `SarkasticEU_Resource_Regrowth.dll`
+  from `BepInEx/plugins` when upgrading. The plugin GUID, the config file
+  `sarkasticeu.resource_regrowth.cfg` and the state file are unchanged, and nothing else is.
+
 ## [0.5.0] - 2026-09-28
 
 ### Added

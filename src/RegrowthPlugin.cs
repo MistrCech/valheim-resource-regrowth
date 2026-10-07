@@ -12,8 +12,8 @@ namespace ResourceRegrowth
 	public class RegrowthPlugin : BaseUnityPlugin
 	{
 		public const string GUID = "sarkasticeu.resource_regrowth";
-		public const string PluginName = "Sarkastic.eu Resource Regrowth";
-		public const string PluginVersion = "0.5.0";
+		public const string PluginName = "Sarkastic.gg Resource Regrowth";
+		public const string PluginVersion = "0.5.1";
 
 		internal static ManualLogSource Log;
 

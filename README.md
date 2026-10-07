@@ -1,4 +1,4 @@
-# Sarkastic.eu Resource Regrowth
+# Sarkastic.gg Resource Regrowth
 
 A server-side [BepInEx](https://github.com/BepInEx/BepInEx) plugin for Valheim 1.0 dedicated servers.
 It brings one-time world content back once an area has been left alone for a while:
@@ -94,7 +94,7 @@ every world load.
 
 ## Install
 
-Copy `SarkasticEU_Resource_Regrowth.dll` to `BepInEx/plugins/` on the server and start it once.
+Copy `SarkasticGG_Resource_Regrowth.dll` to `BepInEx/plugins/` on the server and start it once.
 That creates `BepInEx/config/sarkasticeu.resource_regrowth.cfg`.
 
 It starts in **dry run**: it only logs what it would regrow. Watch the log for a few passes, then
