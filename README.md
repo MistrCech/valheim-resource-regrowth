@@ -4,8 +4,10 @@ A server-side [BepInEx](https://github.com/BepInEx/BepInEx) plugin for Valheim 1
 It brings one-time world content back once an area has been left alone for a while:
 
 - **Surtling core stands** get their core back.
-- **Treasure chests** (never player-built ones) are refilled with their normal loot.
+- **Treasure chests** (never player-built ones) are restocked with fresh loot, whatever was left in them replaced.
 - **One-time creature spawners** (dungeons, camps, caves) spawn their creature again.
+- A **location regrows as a whole**: a dungeon with its entrance, a camp, a village or a ruin comes
+  back all at once -- every core, every creature and every chest in it.
 - **Terrain** that players dug, raised, levelled or paved slowly returns to the land's own shape,
   except around player bases and wards.
 - **Location objects** (off by default): destroyed objects a location or village generated -- wild
@@ -22,7 +24,7 @@ the object's data. The plugin deletes and creates no objects.
 | What | Depleted when | Regrown by |
 |---|---|---|
 | Surtling core stand | the core was taken (`picked`) | setting `picked` back to false |
-| Treasure chest | vanilla filled it once and it is now empty | filling it from the chest's own loot table, as vanilla does when the chest is first generated |
+| Treasure chest | vanilla filled it once, and it is now empty or a player has been near it since it was last restocked | replacing its contents with fresh loot from the chest's own loot table, as vanilla fills it when the chest is first generated |
 | One-time spawner | its creature is gone | clearing the spawned link; vanilla spawns again the next time a player loads the area |
 | Terrain (a zone's `_TerrainCompiler`) | any vertex of the zone's heightmap is modified or painted | a step every `StepHours`: every height change outside a protected area is divided by `Divider` (1.7) and dropped once below `MinDelta`; paint goes back to nothing once the height under it is back, except paved and cultivated ground. The data is written in the game's own format; loaded terrain reloads it and every client rebuilds the ground. |
 
@@ -40,12 +42,26 @@ standing were on exactly those places (same height to the centimetre), none anyw
 A hive hangs under the roof of its house; when the pieces of the house that held it are gone
 (pulled down by players), the hive is not put back, so nothing floats in the air.
 
-Every `CheckIntervalMinutes` the plugin scans the world. An object is regrown only when all of these hold:
+Whether a player took everything from a chest, some of it or nothing cannot be told from the chest,
+so a chest counts as used once a player has been near it; when its time comes it is emptied and
+filled afresh, partly looted or not.
 
-- it has been depleted for `AfterHours` (per category);
-- no player has been near its zone for `IdleHours`;
-- no player-built piece or tombstone lies within `PlayerBuildRadius`;
-- it is not in use: no connected player owns it, and the server does not have it loaded.
+**A location regrows as a whole** (`[Locations] Together`). Every object belongs to the location the
+world generated it with: inside a dungeon (5000 m up) to the dungeon its generator built -- rooms lie
+within about 60 m of it -- and to the location at the same spot on the surface, so a burial chamber's
+interior and its entrance are one; a cave whose interior comes whole with the location (troll and
+bear caves) by its interior radius; on the surface to the location whose ground it stands on. Each
+used-up object keeps its own clock, and as soon as one of them has waited its category's `AfterHours`,
+everything used up in the location comes back together, and every chest in it is restocked: a burial
+chamber whose cores were taken 10 hours ago returns whole, chests and draugr included. With
+`Together = false` each object regrows on its own.
+
+Every `CheckIntervalMinutes` the plugin scans the world. A location (or a lone object) regrows only when all of these hold:
+
+- one of its objects has been used up for its category's `AfterHours`;
+- no player has been near any of it for `IdleHours`;
+- none of it lies within `PlayerBuildRadius` of a player-built piece or tombstone;
+- none of it is in use: no connected player owns it, and the server does not have it loaded.
   Dedicated Simulation, for example, loads the zones around players on the server.
 
 A scan of a large world (165,000 objects) takes about 15 ms of work, spread over about 40 frames.
@@ -113,9 +129,10 @@ applied at startup.
 | Safety | IdleHours | 5 | real hours since a player was near the zone |
 | Safety | PresenceRadiusZones | 2 | a player counts as near all zones (64 m) within this many of their own |
 | Safety | PlayerBuildRadius | 48 | metres around player-built pieces and tombstones that are never touched |
+| Locations | Together | true | a location regrows as a whole: once one thing in it is due, every core, creature and chest in it comes back |
 | SurtlingCores | Enabled / AfterHours | true / 10 | |
 | SurtlingCores | Prefabs | Pickable_SurtlingCoreStand | hide-when-picked, non-respawning pickables to restore |
-| TreasureChests | Enabled / AfterHours | true / 24 | |
+| TreasureChests | Enabled / AfterHours | true / 24 | hours after a player was first near the chest (or it was seen empty) since it was last restocked |
 | TreasureChests | ExcludePrefabs | | chest prefabs never to refill, e.g. `TreasureChest_meadows_buried` |
 | DungeonMonsters | Enabled / AfterHours | true / 24 | |
 | DungeonMonsters | ExcludePrefabs | | spawner prefabs never to reset |

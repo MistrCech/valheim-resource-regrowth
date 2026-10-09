@@ -127,6 +127,12 @@ namespace ResourceRegrowth
 			}
 		}
 
+		// Whether a player has been near the zone since the given time (zones are only remembered for IdleHours).
+		public bool SeenSince(Vector2s zone, DateTime since)
+		{
+			return lastSeen.TryGetValue(zone, out DateTime time) && time >= since;
+		}
+
 		public DateTime LastSeen(Vector2s zone)
 		{
 			return lastSeen.TryGetValue(zone, out DateTime time) ? time : FirstRun;

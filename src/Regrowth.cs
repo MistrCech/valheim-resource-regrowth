@@ -15,16 +15,21 @@ namespace ResourceRegrowth
 		That is off unless switched on.
 
 		- Surtling core stands (hide-when-picked pickables): ZDO "picked" back to false.
-		- Treasure chests: when empty, the plugin fills them from the chest's own loot table, the
-		  way Container.AddDefaultItems does. Vanilla would only refill a chest on load when the
-		  loading machine already owns it, and ownership is handed out on a slower timer than
-		  objects are created, so the plugin does not leave that to chance.
+		- Treasure chests: restocked from the chest's own loot table, the way
+		  Container.AddDefaultItems fills it -- whatever was left in it is replaced. Vanilla would only
+		  fill a chest on load when the loading machine already owns it, and ownership is handed out
+		  on a slower timer than objects are created, so the plugin does not leave that to chance.
+		  Whether a player took everything, some or nothing cannot be told from the chest, so a chest
+		  counts as used once a player has been near it (or it is empty).
 		- One-time creature spawners: once their creature is gone, the "spawned" connection is
 		  cleared; vanilla then spawns again when the area is next loaded (CreatureSpawner).
 
-		An object is regrown only when it has been depleted for AfterHours, no player has been near
-		its zone for IdleHours, there is no player-built piece or tombstone within PlayerBuildRadius,
-		and it is not in use: no connected player owns it and the server does not have it loaded
+		Everything a location holds regrows together (Locations.Together): a dungeon's interior
+		with its entrance, a camp, a village, a ruin. Its clocks run per object as before, and as
+		soon as one of them is due, every core taken, every creature killed and every chest in the
+		location come back at once. A location regrows only when no player has been near any of it
+		for IdleHours, none of it is within PlayerBuildRadius of a player-built piece or tombstone,
+		and none of it is in use: no connected player owns it and the server does not have it loaded
 		(Dedicated Simulation loads zones around players on the server). Changing an object that is
 		loaded somewhere would not show until it is reloaded, or would act at once (a spawner).
 	*/
@@ -56,6 +61,7 @@ namespace ResourceRegrowth
 		private readonly Dictionary<int, bool> corePrefabs = new Dictionary<int, bool>(); // prefab -> picked by default
 		private readonly Dictionary<int, Container> chestPrefabs = new Dictionary<int, Container>();
 		private readonly HashSet<int> spawnerPrefabs = new HashSet<int>();
+		private readonly HashSet<int> generatorPrefabs = new HashSet<int>();
 		private readonly HashSet<int> piecePrefabs = new HashSet<int>();
 		private readonly HashSet<int> tombstonePrefabs = new HashSet<int>();
 		private readonly int terrainPrefab = Terrain.CompilerPrefab.GetStableHashCode();
@@ -197,6 +203,10 @@ namespace ResourceRegrowth
 						RegrowthPlugin.Log.LogInfo($"{prefab.name} has no container with a loot table of its own; ignored.");
 					}
 				}
+				if (prefab.GetComponent<DungeonGenerator>())
+				{
+					generatorPrefabs.Add(hash);
+				}
 				CreatureSpawner spawner = prefab.GetComponent<CreatureSpawner>();
 				if (spawner && spawner.m_respawnTimeMinuts <= 0f && !excludedSpawners.Contains(prefab.name))
 				{
@@ -258,6 +268,8 @@ namespace ResourceRegrowth
 				Dictionary<Vector2s, List<ZDO>> standing = new Dictionary<Vector2s, List<ZDO>>();
 				// Building pieces the world generated (no creator), which is what holds a location object up.
 				Dictionary<Vector2s, List<ZDO>> worldPieces = new Dictionary<Vector2s, List<ZDO>>();
+				// Dungeon generators (dungeon interiors, camps, villages): what an object inside a dungeon belongs to.
+				Dictionary<Vector2s, List<ZDO>> generators = new Dictionary<Vector2s, List<ZDO>>();
 
 				// 1. One pass over every object: note player builds and tombstones, collect candidates.
 				for (int i = 0; i < zdos.Count; i++)
@@ -277,6 +289,15 @@ namespace ResourceRegrowth
 							worldPieces[pieceZone] = pieceList = new List<ZDO>();
 						}
 						pieceList.Add(zdo);
+					}
+					if (generatorPrefabs.Contains(prefab))
+					{
+						Vector2s generatorZone = ZoneSystem.GetZone(zdo.GetPosition());
+						if (!generators.TryGetValue(generatorZone, out List<ZDO> generatorList))
+						{
+							generators[generatorZone] = generatorList = new List<ZDO>();
+						}
+						generatorList.Add(zdo);
 					}
 					if (protectorPrefabs.TryGetValue(prefab, out float protectRadius) && zdo.GetLong(ZDOVars.s_creator, 0L) != 0L && zdo.GetBool(ZDOVars.s_enabled, true))
 					{
@@ -354,17 +375,50 @@ namespace ResourceRegrowth
 				HashSet<string> stillDepleted = new HashSet<string>();
 				HashSet<string> regrown = new HashSet<string>();
 				int errors = 0;
+				Dictionary<string, Group> groups = new Dictionary<string, Group>();
+				Dictionary<Vector2s, List<Place>> places = Places();
 				foreach (Candidate candidate in candidates)
 				{
 					try
 					{
-						Decide(candidate, now, dryRun, blockers, tallies[candidate.kind], stillDepleted, regrown);
+						if (ZDOMan.instance.GetZDO(candidate.uid) != candidate.zdo || candidate.zdo.GetPrefab() != candidate.prefab)
+						{
+							continue;
+						}
+						if (candidate.kind == Kind.Terrain)
+						{
+							if (IsDepleted(candidate.kind, candidate.zdo, null, now))
+							{
+								DecideTerrain(candidate.zdo, now, dryRun, blockers, tallies[candidate.kind], stillDepleted);
+							}
+							continue;
+						}
+						GroupOf(candidate, groups, places, generators).members.Add(candidate);
 					}
 					catch (Exception e)
 					{
 						if (errors++ == 0)
 						{
 							RegrowthPlugin.Log.LogWarning($"Skipped {Describe(candidate.kind)} {Name(candidate.prefab)}: {e}");
+						}
+					}
+				}
+				int locationsRegrown = 0;
+				s_waitingLogged = 0;
+				foreach (Group group in groups.Values)
+				{
+					try
+					{
+						if (DecideGroup(group, now, dryRun, blockers, tallies, stillDepleted, regrown) && group.name != null)
+						{
+							locationsRegrown++;
+						}
+					}
+					catch (Exception e)
+					{
+						if (errors++ == 0)
+						{
+							RegrowthPlugin.Log.LogWarning($"Skipped {group.name ?? "an object"} at {group.position.x:0},{group.position.z:0}: {e}");
 						}
 					}
 				}
@@ -411,6 +465,7 @@ namespace ResourceRegrowth
 							: $"{Describe(t.Key)}s {t.Value.depleted} depleted ({t.Value.waiting} waiting, {t.Value.blocked} near player builds, {t.Value.inUse} in use, "
 							+ $"{t.Value.regrown} {(dryRun ? "would regrow" : "regrown")})"))
 					+ (locationObjects != null ? $" ({locationObjects.SourceCount} locations and rooms known{(loadedPrefabs > 0 ? $", {loadedPrefabs} prefab(s) read this pass" : "")})" : "")
+					+ (settings.LocationsTogether.Value ? $"; {locationsRegrown} location(s) {(dryRun ? "would regrow" : "regrew")} as a whole" : "")
 					+ $". Scanned {zdos.Count} objects: {work.ElapsedMilliseconds} ms of work spread over {frames} frames ({wall.ElapsedMilliseconds} ms wall)."
 					+ (errors > 0 ? $" {errors} object(s) skipped after errors." : "")
 					+ (regrown.Count > 0 || terrainStepped ? " World save requested." : ""));
@@ -425,53 +480,263 @@ namespace ResourceRegrowth
 
 		private Dictionary<Vector2s, List<Terrain.Protector>> protectors = new Dictionary<Vector2s, List<Terrain.Protector>>();
 
-		private void Decide(Candidate candidate, DateTime now, bool dryRun, Dictionary<Vector2s, List<Vector3>> blockers,
-			Tally tally, HashSet<string> stillDepleted, HashSet<string> regrown)
+		// What one location holds (or a lone object), decided as one.
+		private class Group
 		{
-			ZDO zdo = candidate.zdo;
-			if (ZDOMan.instance.GetZDO(candidate.uid) != zdo || zdo.GetPrefab() != candidate.prefab || !IsDepleted(candidate.kind, zdo))
+			public string name;
+			public Vector3 position;
+			public bool dungeon;
+			public readonly List<Candidate> members = new List<Candidate>();
+		}
+
+		private struct Place
+		{
+			public Vector2s zone;
+			public string name;
+			public Vector3 position;
+			public float radius, interior;
+		}
+
+		// Every location the world has placed, by the zone its centre is in.
+		private static Dictionary<Vector2s, List<Place>> Places()
+		{
+			Dictionary<Vector2s, List<Place>> places = new Dictionary<Vector2s, List<Place>>();
+			foreach (KeyValuePair<Vector2s, ZoneSystem.LocationInstance> entry in ZoneSystem.instance.m_locationInstances)
 			{
-				return;
+				ZoneSystem.LocationInstance instance = entry.Value;
+				if (!instance.m_placed || instance.m_location == null)
+				{
+					continue;
+				}
+				Vector2s zone = ZoneSystem.GetZone(instance.m_position);
+				if (!places.TryGetValue(zone, out List<Place> list))
+				{
+					places[zone] = list = new List<Place>();
+				}
+				list.Add(new Place
+				{
+					zone = entry.Key, name = instance.m_location.m_prefabName, position = instance.m_position,
+					radius = instance.m_location.m_exteriorRadius, interior = instance.m_location.m_interiorRadius,
+				});
 			}
-			if (candidate.kind == Kind.Terrain)
+			return places;
+		}
+
+		/*
+			Which location an object belongs to. Inside a dungeon (5000 m up) that is the dungeon its
+			nearest dungeon generator built (rooms lie within about 60 m of it), and the location at the
+			same spot on the surface, so a dungeon's interior and its entrance are one; an interior the
+			location is built with whole, without a generator (troll and bear caves), is the location
+			whose interior radius covers it. On the surface it is the nearest location whose ground the
+			object stands on. An object of no location is a group of its own.
+		*/
+		private Group GroupOf(Candidate candidate, Dictionary<string, Group> groups, Dictionary<Vector2s, List<Place>> places, Dictionary<Vector2s, List<ZDO>> generators)
+		{
+			Vector3 position = candidate.zdo.GetPosition();
+			bool inside = position.y > 3000f;
+			string key = null, name = null;
+			Vector3 at = position;
+			if (settings.LocationsTogether.Value)
 			{
-				DecideTerrain(zdo, now, dryRun, blockers, tally, stillDepleted);
-				return;
+				ZDO generator = inside ? Nearest(generators, position, 96f) : null;
+				{
+					Vector3 anchor = generator != null ? generator.GetPosition() : position;
+					if (NearestPlace(places, anchor, generator != null ? Reach.Generator : inside ? Reach.Interior : Reach.Surface, out Place place))
+					{
+						key = $"location {place.zone.x},{place.zone.y}";
+						name = place.name;
+						at = place.position;
+					}
+					else if (generator != null)
+					{
+						key = $"dungeon {generator.m_uid}";
+						name = Name(generator.GetPrefab());
+						at = anchor;
+					}
+				}
 			}
-			tally.depleted++;
-			string key = Key(candidate.kind, zdo);
-			stillDepleted.Add(key);
-			double depleted = Hours(state.DepletedSince(key, now), now);
-			Vector3 position = zdo.GetPosition();
-			double idle = Hours(state.LastSeen(ZoneSystem.GetZone(position)), now);
-			if (depleted < AfterHours(candidate.kind) || idle < settings.IdleHours.Value)
+			if (key == null)
 			{
-				tally.waiting++;
-				return;
+				key = Key(candidate.kind, candidate.zdo);
 			}
-			if (IsBlocked(blockers, position))
+			if (!groups.TryGetValue(key, out Group group))
 			{
-				tally.blocked++;
-				return;
+				groups[key] = group = new Group { name = name, position = at };
 			}
-			if (InUse(zdo))
+			group.dungeon |= inside;
+			return group;
+		}
+
+		private int s_waitingLogged;
+
+		// "3 surtling core stands (2 used up), 4 treasure chests (4 used), 9 creature spawners (5 used up)"
+		private static string Summary(List<Candidate> members, List<Candidate> depleted)
+		{
+			return string.Join(", ", members.GroupBy(m => m.kind).Select(g =>
 			{
-				tally.inUse++;
-				return;
+				int used = depleted.Count(d => d.kind == g.Key);
+				return $"{g.Count()} {Describe(g.Key)}{(g.Count() == 1 ? "" : "s")} ({used} {(g.Key == Kind.Chest ? "used" : "used up")})";
+			}));
+		}
+
+		private static ZDO Nearest(Dictionary<Vector2s, List<ZDO>> byZone, Vector3 position, float within)
+		{
+			ZDO best = null;
+			float bestDistance = within * within;
+			Vector2s zone = ZoneSystem.GetZone(position);
+			int zones = Mathf.CeilToInt(within / 64f);
+			for (int dy = -zones; dy <= zones; dy++)
+			{
+				for (int dx = -zones; dx <= zones; dx++)
+				{
+					if (!byZone.TryGetValue(new Vector2s(zone.x + dx, zone.y + dy), out List<ZDO> list))
+					{
+						continue;
+					}
+					foreach (ZDO zdo in list)
+					{
+						float distance = (zdo.GetPosition() - position).sqrMagnitude;
+						if (distance <= bestDistance)
+						{
+							bestDistance = distance;
+							best = zdo;
+						}
+					}
+				}
 			}
-			tally.regrown++;
-			if (tally.logged < settings.LogDetailsPerPass.Value)
+			return best;
+		}
+
+		private enum Reach { Surface, Interior, Generator }
+
+		// A dungeon generator stands above its location's centre; anything else within its location's (interior) radius and a little.
+		private static bool NearestPlace(Dictionary<Vector2s, List<Place>> places, Vector3 position, Reach reach, out Place found)
+		{
+			found = default;
+			bool any = false;
+			float bestDistance = float.MaxValue;
+			Vector2s zone = ZoneSystem.GetZone(position);
+			for (int dy = -2; dy <= 2; dy++)
 			{
-				tally.logged++;
+				for (int dx = -2; dx <= 2; dx++)
+				{
+					if (!places.TryGetValue(new Vector2s(zone.x + dx, zone.y + dy), out List<Place> list))
+					{
+						continue;
+					}
+					foreach (Place place in list)
+					{
+						float x = place.position.x - position.x;
+						float z = place.position.z - position.z;
+						float distance = Mathf.Sqrt(x * x + z * z);
+						float within = reach == Reach.Generator ? 64f
+							: reach == Reach.Interior ? (place.interior > 0f ? place.interior + 16f : -1f)
+							: Mathf.Max(place.radius, 16f) + 8f;
+						if (distance <= within && distance < bestDistance)
+						{
+							bestDistance = distance;
+							found = place;
+							any = true;
+						}
+					}
+				}
+			}
+			return any;
+		}
+
+		/*
+			A location as one: each used-up object keeps its own clock (state "depleted" entries, as
+			before), and as soon as one of them has waited its AfterHours, everything used up in the
+			location comes back together with every chest in it -- if nobody has been near any of it
+			for IdleHours, none of it is near a player's build and none of it is in use. Returns
+			whether it regrew (or would have, in a dry run).
+		*/
+		private bool DecideGroup(Group group, DateTime now, bool dryRun, Dictionary<Vector2s, List<Vector3>> blockers,
+			Dictionary<Kind, Tally> tallies, HashSet<string> stillDepleted, HashSet<string> regrown)
+		{
+			List<Candidate> depleted = new List<Candidate>();
+			string due = null;
+			double dueBy = double.MinValue;
+			double soonest = double.MinValue;
+			foreach (Candidate member in group.members)
+			{
+				string key = Key(member.kind, member.zdo);
+				if (!IsDepleted(member.kind, member.zdo, key, now))
+				{
+					continue;
+				}
+				depleted.Add(member);
+				tallies[member.kind].depleted++;
+				stillDepleted.Add(key);
+				double hours = Hours(state.DepletedSince(key, now), now);
+				double over = hours - AfterHours(member.kind);
+				soonest = Math.Max(soonest, over);
+				if (over >= 0 && over > dueBy)
+				{
+					dueBy = over;
+					due = $"{Describe(member.kind)} {Name(member.prefab)} {(member.kind == Kind.Chest ? "used" : "used up")} {hours:0.##} h ago";
+				}
+			}
+			if (depleted.Count == 0)
+			{
+				return false;
+			}
+			if (due == null)
+			{
+				dueBy = soonest;
+			}
+			double idle = double.MaxValue;
+			foreach (Candidate member in group.members)
+			{
+				idle = Math.Min(idle, Hours(state.LastSeen(ZoneSystem.GetZone(member.zdo.GetPosition())), now));
+			}
+			if (due == null || idle < settings.IdleHours.Value)
+			{
+				depleted.ForEach(member => tallies[member.kind].waiting++);
+				if (dryRun && s_waitingLogged++ < settings.LogDetailsPerPass.Value)
+				{
+					RegrowthPlugin.Log.LogInfo(
+						$"Waiting: {group.name ?? "a lone object"} at {group.position.x:0},{group.position.z:0}{(group.dungeon ? " (dungeon)" : "")}: {Summary(group.members, depleted)}; "
+						+ (due != null ? $"due ({due})" : $"due in {-dueBy:0.#} h") + $", area idle {(idle > 1e6 ? "always" : idle.ToString("0.##") + " h")} (needs {settings.IdleHours.Value:0.#}).");
+				}
+				return false;
+			}
+			if (group.members.Any(member => IsBlocked(blockers, member.zdo.GetPosition())))
+			{
+				depleted.ForEach(member => tallies[member.kind].blocked++);
+				return false;
+			}
+			if (group.members.Any(member => InUse(member.zdo)))
+			{
+				depleted.ForEach(member => tallies[member.kind].inUse++);
+				return false;
+			}
+			Dictionary<Kind, int> counts = new Dictionary<Kind, int>();
+			foreach (Candidate member in group.members)
+			{
+				// Every chest of the location is restocked, used or not: what a player left in it cannot be told apart.
+				if (!depleted.Contains(member) && !(member.kind == Kind.Chest && IsRestockable(member.zdo)))
+				{
+					continue;
+				}
+				tallies[member.kind].regrown++;
+				counts[member.kind] = (counts.TryGetValue(member.kind, out int n) ? n : 0) + 1;
+				if (!dryRun)
+				{
+					Apply(member.kind, member.zdo);
+					regrown.Add(Key(member.kind, member.zdo));
+				}
+			}
+			Tally first = tallies[depleted[0].kind];
+			if (first.logged < settings.LogDetailsPerPass.Value)
+			{
+				first.logged++;
+				string what = string.Join(", ", counts.Select(c => $"{c.Value} {Describe(c.Key)}{(c.Value == 1 ? "" : "s")}"));
 				RegrowthPlugin.Log.LogInfo(
-					$"{(dryRun ? "Would regrow" : "Regrew")} {Describe(candidate.kind)} {Name(candidate.prefab)} at {position.x:0},{position.z:0}{(position.y > 3000f ? " (dungeon)" : "")}: "
-					+ $"depleted {depleted:0.##} h, area idle {idle:0.##} h.");
+					$"{(dryRun ? "Would regrow" : "Regrew")} {group.name ?? "a lone object"} at {group.position.x:0},{group.position.z:0}{(group.dungeon ? " (dungeon)" : "")}: {what}; "
+					+ $"due: {due}, area idle {idle:0.##} h.");
 			}
-			if (!dryRun)
-			{
-				Apply(candidate.kind, zdo);
-				regrown.Add(key);
-			}
+			return true;
 		}
 
 		/*
@@ -705,14 +970,16 @@ namespace ResourceRegrowth
 			return prefabNames.TryGetValue(prefab, out string name) ? name : prefab.ToString();
 		}
 
-		private bool IsDepleted(Kind kind, ZDO zdo)
+		private bool IsDepleted(Kind kind, ZDO zdo, string key, DateTime now)
 		{
 			switch (kind)
 			{
 				case Kind.Core:
 					return zdo.GetBool(ZDOVars.s_picked, corePrefabs[zdo.GetPrefab()]);
 				case Kind.Chest:
-					return IsLootedChest(zdo);
+					// Used: emptied, or a player has been near it since it was last restocked (its clock then keeps running).
+					return IsRestockable(zdo)
+						&& (IsEmpty(zdo) || state.HasKey(key) || state.SeenSince(ZoneSystem.GetZone(zdo.GetPosition()), now.AddHours(-Math.Max(0f, settings.IdleHours.Value))));
 				case Kind.Terrain:
 					return Terrain.IsModified(zdo.GetByteArray(ZDOVars.s_TCData));
 				default:
@@ -723,14 +990,15 @@ namespace ResourceRegrowth
 			}
 		}
 
-		private static bool IsLootedChest(ZDO zdo)
+		// Player-built chests are never touched, a chest vanilla has not filled yet has nothing to restock,
+		// and chests from cheats are left alone.
+		private static bool IsRestockable(ZDO zdo)
 		{
-			// Player-built chests are never touched, a chest vanilla has not filled yet is not looted,
-			// and chests from cheats are left alone.
-			if (zdo.GetLong(ZDOVars.s_creator, 0L) != 0L || !zdo.GetBool(ZDOVars.s_addedDefaultItems) || zdo.GetBool(ZDOVars.s_cheated))
-			{
-				return false;
-			}
+			return zdo.GetLong(ZDOVars.s_creator, 0L) == 0L && zdo.GetBool(ZDOVars.s_addedDefaultItems) && !zdo.GetBool(ZDOVars.s_cheated);
+		}
+
+		private static bool IsEmpty(ZDO zdo)
+		{
 			// Container.Save stores the inventory as a byte array (Inventory.Save): version, then item count.
 			byte[] items = zdo.GetByteArray(ZDOVars.s_items);
 			if (items == null)

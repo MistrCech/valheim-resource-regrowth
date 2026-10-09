@@ -20,6 +20,8 @@ namespace ResourceRegrowth
 		public readonly ConfigEntry<int> PresenceRadiusZones;
 		public readonly ConfigEntry<float> PlayerBuildRadius;
 
+		public readonly ConfigEntry<bool> LocationsTogether;
+
 		public readonly ConfigEntry<bool> CoresEnabled;
 		public readonly ConfigEntry<float> CoresAfterHours;
 		public readonly ConfigEntry<string> CorePrefabs;
@@ -64,6 +66,9 @@ namespace ResourceRegrowth
 			PlayerBuildRadius = config.Bind("Safety", "PlayerBuildRadius", 48f,
 				"Nothing within this many metres (horizontally) of a player-built piece or a tombstone is regrown.");
 
+			LocationsTogether = config.Bind("Locations", "Together", true,
+				"Everything a location holds regrows together -- a dungeon's interior with its entrance, a camp, a village, a ruin: as soon as one thing in it is due (each kind after its own AfterHours), every surtling core taken, every creature killed and every treasure chest in it come back at once. Off: each object on its own clock.");
+
 			CoresEnabled = config.Bind("SurtlingCores", "Enabled", true,
 				"Put taken surtling cores back on their stands (burial chambers and similar).");
 			CoresAfterHours = config.Bind("SurtlingCores", "AfterHours", 10f,
@@ -72,9 +77,9 @@ namespace ResourceRegrowth
 				"Pickables that stay in place when taken (hide-when-picked) and should come back. Comma separated.");
 
 			ChestsEnabled = config.Bind("TreasureChests", "Enabled", true,
-				"Refill looted treasure chests (never player-built chests) with their normal loot.");
+				"Restock treasure chests (never player-built chests) with fresh loot from their own loot table; whatever was left in them is replaced.");
 			ChestsAfterHours = config.Bind("TreasureChests", "AfterHours", 24f,
-				"Real hours after the plugin first saw a chest empty.");
+				"Real hours after a player was first near a chest (or it was seen empty) since it was last restocked. Whether anything was taken cannot be told from a chest, so being near it counts.");
 			ChestsExclude = config.Bind("TreasureChests", "ExcludePrefabs", "",
 				"Chest prefabs never to refill, e.g. TreasureChest_meadows_buried for dug-up treasure. Comma separated.");
 

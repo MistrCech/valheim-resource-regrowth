@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.6.0] - 2026-10-09
+
+### Changed
+
+- A location regrows as a whole (`[Locations] Together`, on by default). Players found that a
+  burial chamber gave its surtling cores back after 10 hours while its chests and draugr stayed
+  gone (24 hours, each on its own clock). Every object now belongs to its location -- inside a dungeon
+  to the dungeon its generator built and the location above it, so interior and entrance are one; a
+  troll or bear cave by its interior radius; on the surface the location it stands in -- and as soon
+  as one object's clock has run its category's `AfterHours`, everything used up in the location comes
+  back at once and every chest in it is restocked. The safety conditions apply to the whole
+  location: nobody near any of it for `IdleHours`, none of it near a player's build, none of it loaded.
+- Treasure chests are restocked whether they were emptied, partly looted or not touched: whatever is
+  left in them is replaced by fresh loot from their own table. A chest left with a few feathers
+  never came back before. What a player took cannot be told from a chest, so a chest's clock starts
+  when a player is first near it after it was last restocked (or when it is seen empty). Player-built
+  chests are never touched, as before.
+- Dry runs also list the locations still waiting, with what is used up in them and when they are due.
+
+Tested on a copy of the live world (9 October, 19:21) with the live state: the 37 locations with something used up grouped
+correctly -- burial chambers with their cores, chests and skeletons inside, troll caves, ruins, farms,
+houses -- and with every wait set to zero 24 locations came back whole: 14 cores, 45 spawners and 33
+chests, 14 of them empty and 19 with leftovers, all with fresh loot; the 3 empty chests within 48 m of
+a player's build stayed empty.
+
 ## [0.5.1] - 2026-10-07
 
 ### Changed
