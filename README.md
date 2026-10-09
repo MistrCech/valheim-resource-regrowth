@@ -12,9 +12,13 @@ It brings one-time world content back once an area has been left alone for a whi
   except around player bases and wards.
 - **Location objects** (off by default): destroyed objects a location or village generated -- wild
   **beehives** in abandoned houses, for example -- are put back exactly where they stood.
+- **Zones** (off by default): a zone players have been in is **generated again by the game itself**
+  once nobody has been near it for three days -- trees, rocks and ore deposits, bushes, pickables, the
+  location with its buildings, chests, creatures and dungeon, and the ground -- as if no player had
+  ever been there. Never where anything of a player's is.
 
-Players need nothing: vanilla clients work. The plugin depends on BepInEx and nothing else,
-and it patches no game code.
+Players need nothing: vanilla clients work. The plugin depends on BepInEx and nothing else. It
+patches one game method, and only with Zones switched on (see Zones).
 
 ## How it works
 
@@ -65,6 +69,60 @@ Every `CheckIntervalMinutes` the plugin scans the world. A location (or a lone o
   Dedicated Simulation, for example, loads the zones around players on the server.
 
 A scan of a large world (165,000 objects) takes about 15 ms of work, spread over about 40 frames.
+
+### Zones
+
+Vanilla never brings back a felled tree, a mined copper or tin deposit, a stone tower or a house
+players pulled down. With `[Zones] Enabled`, a zone (64 m square) that a player has been in or next to
+is, once nobody has been near it (`PresenceRadiusZones`) for `IdleHours` (72), generated again by the
+game's own zone generation, the way Dedicated Simulation generates the zones around players
+(ZoneSystem.SpawnZone, ghost mode). Every object the game makes takes the place of the old one of its
+kind standing there, which goes; what is left over of what only the zone itself makes -- vegetation,
+stumps and logs, wild creatures, items lying about, the record of what was done to the ground -- goes
+too. So trees, rocks and ore deposits, bushes, pickables, the location with its buildings, chests,
+spawners and dungeon come back. Measured on a copy of a live world against a fresh world with the same
+seed: 860 of 916 zones without a location came out exactly as first generated, the rest with a few
+trees or rocks elsewhere (the game decides placement partly by what colliders are around at that
+moment).
+
+A location comes back the way round it was: the game draws its rotation from an unseeded random
+number when it first places it, so the rotation is read from the location's own record before the
+zone is cleared and given back when it is placed again (a patch of `ZoneSystem.SpawnLocation`, the
+only game method this plugin touches). With the same rotation its dungeon gets the same seed and the
+same rooms. Because old objects are matched to what the game made object by object, a location or
+dungeon that reaches over the zone's edge (a boar runestone's spawners, a crypt's rooms) is replaced
+there too, and a neighbour's objects reaching into the zone stay.
+
+Never generated again:
+
+- a zone with anything of a player's in it or within `PlayerBuildRadius` (48 m) of it: pieces they
+  built (also portals, beds, crops), tombstones, ships and carts, items a player has carried -- also
+  inside the world's chests and barrels (an item remembers it has been in a bag) --, tamed creatures,
+  item and armour stands of the world holding something, cultivated ground, paved ground outside the
+  zone's location;
+- a zone where players have planted saplings (a grown tree carries nothing of its planter, so the zone
+  is remembered from the sapling);
+- a protected location (`ProtectedLocations`: the start temple with the guardian stones, boss altars,
+  traders, Hildir's dungeons) and every location the game places only once; nothing left over within a
+  protected location's reach in a neighbouring zone goes, and no trader;
+- a zone the server has loaded or next to one it has, or anything in it a connected player owns;
+- anything in the first `GraceMinutes` (30) after a start: who was near while the server was off is
+  not known.
+
+Dirt paths, dug and raised ground outside fields and paved roads go with the reset, as they do with
+Terrain regrowth.
+
+If the game cannot generate the zone now, or throws while doing it, nothing old has been deleted
+yet: whatever the attempt made is removed, the zone is marked generated and its location placed again,
+and after an exception zone resets stop until the next start.
+
+At its first run every zone generated so far counts as visited -- what players did there before
+cannot be told -- and no zone is generated again before `IdleHours` from then. Presence is kept for
+the longer of the two idle times, also while Zones are off, and a zone without a record counts as seen
+at the time from which presence is known completely, so switching Zones on later or raising
+`IdleHours` never makes a recently visited zone due. At most `PerPass` zones per pass, longest idle
+first, one per frame (each a few milliseconds to a few tens); a zone that cannot be done now waits an
+hour. `DryRun` (on by default) only logs which zones would be generated again and what they hold.
 
 ### Terrain protection
 
@@ -138,6 +196,12 @@ applied at startup.
 | DungeonMonsters | ExcludePrefabs | | spawner prefabs never to reset |
 | LocationObjects | Enabled / AfterHours | false / 48 | put back destroyed objects of locations and villages (needs a restart) |
 | LocationObjects | Prefabs | Beehive | which ones; only world-generated objects are ever put back |
+| Zones | Enabled | false | generate visited zones again as the world first made them (needs a restart) |
+| Zones | DryRun | true | only log which zones would be generated again |
+| Zones | IdleHours | 72 | real hours with nobody near before a zone is generated again |
+| Zones | PerPass | 8 | most zones per pass |
+| Zones | GraceMinutes | 30 | minutes after a start before any zone is generated again |
+| Zones | ProtectedLocations | StartTemple, boss altars, traders, Hildir's dungeons | never generated again (also every location placed only once) |
 
 ## Build
 

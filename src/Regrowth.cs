@@ -68,6 +68,7 @@ namespace ResourceRegrowth
 		private Dictionary<int, float> protectorPrefabs = new Dictionary<int, float>();
 		private readonly Dictionary<int, string> prefabNames = new Dictionary<int, string>();
 		private LocationObjects locationObjects;
+		private ZoneReset zones;
 		private float presenceTimer;
 		private float passTimer;
 		private Coroutine running;
@@ -90,6 +91,22 @@ namespace ResourceRegrowth
 			state = new RegrowthState(StatePath());
 			DateTime now = Now();
 			state.Load(now);
+			if (!state.PresenceKnownLoaded)
+			{
+				// Older versions kept a zone's presence for IdleHours only.
+				state.PresenceKnownSince = now.AddHours(-Math.Max(0f, settings.IdleHours.Value));
+			}
+			if (settings.ZonesEnabled.Value)
+			{
+				if (RegrowthPlugin.SpawnLocationPatched)
+				{
+					zones = new ZoneReset(settings, state, Name, WorldLoaded);
+				}
+				else
+				{
+					RegrowthPlugin.Log.LogWarning("Zones: switched on after the server started; they need a restart (the game method that keeps a location's rotation is patched at startup only).");
+				}
+			}
 			passTimer = 60f;
 			RegrowthPlugin.Log.LogInfo(
 				$"Active{(settings.DryRun.Value ? " (dry run: nothing will be changed)" : "")}. "
@@ -105,6 +122,7 @@ namespace ResourceRegrowth
 				host.StopCoroutine(running);
 				running = null;
 			}
+			zones?.Stop();
 			SaveState();
 		}
 
@@ -232,6 +250,7 @@ namespace ResourceRegrowth
 					continue;
 				}
 				Vector2s zone = ZoneSystem.GetZone(peer.GetRefPos());
+				zones?.MarkVisited(zone, now);
 				for (int dy = -radius; dy <= radius; dy++)
 				{
 					for (int dx = -radius; dx <= radius; dx++)
@@ -272,10 +291,12 @@ namespace ResourceRegrowth
 				Dictionary<Vector2s, List<ZDO>> generators = new Dictionary<Vector2s, List<ZDO>>();
 
 				// 1. One pass over every object: note player builds and tombstones, collect candidates.
+				zones?.Clear();
 				for (int i = 0; i < zdos.Count; i++)
 				{
 					ZDO zdo = zdos[i];
 					int prefab = zdo.GetPrefab();
+					zones?.Note(zdo, prefab);
 					if (tombstonePrefabs.Contains(prefab)
 						|| (piecePrefabs.Contains(prefab) && zdo.GetLong(ZDOVars.s_creator, 0L) != 0L))
 					{
@@ -446,13 +467,39 @@ namespace ResourceRegrowth
 					stillDepleted.Remove(key);
 				}
 				state.KeepOnly(stillDepleted);
+				// 3. Zones generated again as the world first made them, one per frame.
+				ZoneReset.Tally zoneTally = null;
+				if (zones != null && WorldLoaded())
+				{
+					zoneTally = new ZoneReset.Tally();
+					IEnumerator reset = zones.Run(now, blockers, zoneTally);
+					while (reset.MoveNext())
+					{
+						frames++;
+						work.Stop();
+						yield return null;
+						work.Start();
+					}
+					if (!WorldLoaded())
+					{
+						yield break;
+					}
+				}
+				bool zonesChanged = zoneTally != null && zoneTally.reset > 0 && !settings.ZonesDryRun.Value && !dryRun;
 				// The world changed and the clocks were reset; a crash before the next autosave would
 				// lose the one and keep the other, so save now (the same call as the autosave).
-				if ((regrown.Count > 0 || terrainStepped) && ZNet.instance.EnoughDiskSpaceAvailable(out bool _))
+				if ((regrown.Count > 0 || terrainStepped || zonesChanged) && ZNet.instance.EnoughDiskSpaceAvailable(out bool _))
 				{
 					ZNet.instance.Save(sync: false, saveOtherPlayerProfiles: true, waitForNextFrame: true);
 				}
-				state.ForgetZonesSeenBefore(now.AddHours(-Math.Max(0f, settings.IdleHours.Value)));
+				// Kept for the longer of the idle times (zones' too, also while they are off, so that switching them on finds the history);
+				// what is forgotten moves the time from which presence is known completely.
+				DateTime cutoff = now.AddHours(-Math.Max(Math.Max(0f, settings.IdleHours.Value), Math.Max(0f, settings.ZonesIdleHours.Value)));
+				state.ForgetZonesSeenBefore(cutoff);
+				if (cutoff > state.PresenceKnownSince)
+				{
+					state.PresenceKnownSince = cutoff;
+				}
 
 				RegrowthPlugin.Log.LogInfo(
 					$"Pass{(dryRun ? " (dry run)" : "")}: "
@@ -466,9 +513,11 @@ namespace ResourceRegrowth
 							+ $"{t.Value.regrown} {(dryRun ? "would regrow" : "regrown")})"))
 					+ (locationObjects != null ? $" ({locationObjects.SourceCount} locations and rooms known{(loadedPrefabs > 0 ? $", {loadedPrefabs} prefab(s) read this pass" : "")})" : "")
 					+ (settings.LocationsTogether.Value ? $"; {locationsRegrown} location(s) {(dryRun ? "would regrow" : "regrew")} as a whole" : "")
+					+ (zoneTally != null ? $"; zones {zoneTally.visited} visited ({zoneTally.waiting} waiting, {zoneTally.due} due, {zoneTally.blocked} kept{(zoneTally.why.Count > 0 ? ": " + string.Join(", ", zoneTally.why.OrderByDescending(w => w.Value).Select(w => $"{w.Value} {w.Key}")) : "")}, "
+						+ $"{zoneTally.reset} {(settings.ZonesDryRun.Value || dryRun ? "would be generated again" : "generated again")}{(zoneTally.failed > 0 ? $", {zoneTally.failed} failed and undone" : "")})" : "")
 					+ $". Scanned {zdos.Count} objects: {work.ElapsedMilliseconds} ms of work spread over {frames} frames ({wall.ElapsedMilliseconds} ms wall)."
 					+ (errors > 0 ? $" {errors} object(s) skipped after errors." : "")
-					+ (regrown.Count > 0 || terrainStepped ? " World save requested." : ""));
+					+ (regrown.Count > 0 || terrainStepped || zonesChanged ? " World save requested." : ""));
 				terrainStepped = false;
 				SaveState();
 			}

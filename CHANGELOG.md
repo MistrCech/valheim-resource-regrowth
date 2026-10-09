@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.7.0] - 2026-10-10
+
+### Added
+
+- `[Zones]` (off by default, `DryRun` on by default): a zone players have been in is generated again
+  by the game itself once nobody has been near it for `IdleHours` (72): trees, rocks and ore deposits,
+  bushes, pickables, the location with its buildings, chests, spawners and dungeon, and the ground --
+  as if no player had ever been there. Vanilla never brings back a felled tree, a mined deposit or a
+  house pulled down. In one frame the zone is marked not generated, its location not placed, and
+  `ZoneSystem.SpawnZone` runs again in ghost mode; every object the game makes then replaces the old
+  one of its prefab standing in its place (within half a metre), in the zone or over its edge, and
+  what is left over of what only the zone itself makes (vegetation, stumps, logs, fractured rocks,
+  wild creatures, birds, fish, items lying about, the ground's record) goes. A location gets back the
+  rotation it had: the game draws it from an unseeded random number, so it is read from the
+  location's proxy (rounded to the game's 22.5-degree step, as the save truncates Euler angles to half
+  a degree) and given back by a prefix on `ZoneSystem.SpawnLocation` -- the plugin's first game patch,
+  applied only with Zones switched on. Never touched: zones with anything of a player's in them or
+  within `PlayerBuildRadius` (pieces incl. portals, ships, carts and crops; tombstones; items a player
+  has carried; tamed creatures; world item and armour stands holding something; cultivated ground and
+  paved ground outside the location; the world's chests and barrels holding anything that has been in
+  a player's bag), zones where players planted saplings, protected locations (`ProtectedLocations`,
+  plus every location the game places only once, and what of them reaches into a neighbour), zones
+  loaded on the server or next to one that is, and the first `GraceMinutes` (30) after a start. A
+  generation that fails or throws is undone: nothing old is deleted before the game has made the zone
+  again. At its first run every zone generated so far counts as visited, and nothing is generated again
+  before `IdleHours` from then; presence is now kept for the longer idle time (also with Zones off)
+  and only moves forward (`presencesince` in the state); at most `PerPass` zones per pass, one per
+  frame, a zone that cannot be done now waiting an hour.
+
+Tested on a copy of the live world (9 October) with every zone due at once: 1108 of 1190 zones were
+generated again, 0 exceptions, about 9 ms of work per zone; 82 were kept (72 with players' things in
+or near them, 6 protected locations, 3 fields, 1 with players' saplings) and stayed unchanged object
+for object; all 263 locations came back with the same rotation and position and all 27 dungeons with
+the same rooms (the first tries lost five crypts and a troll cave's interior to guessed ownership and
+reused ZDO objects, and changed three dungeons' rooms through the half-degree truncation -- all fixed
+before release); zones without a location matched a fresh world of the same seed in 34 of 35 changed
+cases; objects players had removed came back (rocks, trees, obsidian and copper deposits, beehives,
+bone piles). A dungeon generation made to throw was undone: the zone and its neighbours stayed as they
+were and resets stopped. With the defaults, the first run counted all 1190 zones as visited and
+generated none (72 h to go). A review by three
+independent readers found that the world's chests holding players' things, trees grown from players'
+saplings, a failed generation (no undo), a trader reaching into a neighbouring zone, items the world
+placed but nobody loaded yet (read as carried), presence forgotten while Zones were off, wasted
+per-pass slots and switching Zones on without the patch were not handled; all fixed above.
+
 ## [0.6.0] - 2026-10-09
 
 ### Changed

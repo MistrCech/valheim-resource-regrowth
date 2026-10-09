@@ -4,7 +4,7 @@
     <AssemblyName>SarkasticGG_Resource_Regrowth</AssemblyName>
     <RootNamespace>ResourceRegrowth</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Version>0.6.0</Version>
+    <Version>0.7.0</Version>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>$(MSBuildThisFileDirectory)../bin/$(Configuration)/</OutputPath>
     <!-- Path to a Valheim dedicated server with BepInEx: environment variable VALHEIM_DEDI_INSTALL or -p:ValheimServerDir=... -->
@@ -21,5 +21,6 @@
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(Managed)/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.PhysicsModule"><HintPath>$(Managed)/UnityEngine.PhysicsModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="BepInEx"><HintPath>$(ValheimServerDir)/BepInEx/core/BepInEx.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(ValheimServerDir)/BepInEx/core/0Harmony.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 </Project>

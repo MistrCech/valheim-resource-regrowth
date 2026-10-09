@@ -38,6 +38,13 @@ namespace ResourceRegrowth
 		public readonly ConfigEntry<float> LocationObjectsAfterHours;
 		public readonly ConfigEntry<string> LocationObjectsPrefabs;
 
+		public readonly ConfigEntry<bool> ZonesEnabled;
+		public readonly ConfigEntry<bool> ZonesDryRun;
+		public readonly ConfigEntry<float> ZonesIdleHours;
+		public readonly ConfigEntry<int> ZonesPerPass;
+		public readonly ConfigEntry<float> ZonesGraceMinutes;
+		public readonly ConfigEntry<string> ZonesProtected;
+
 		public readonly ConfigEntry<bool> TerrainEnabled;
 		public readonly ConfigEntry<float> TerrainAfterHours;
 		public readonly ConfigEntry<float> TerrainStepHours;
@@ -96,6 +103,20 @@ namespace ResourceRegrowth
 				"Real hours after the plugin first saw the object missing.");
 			LocationObjectsPrefabs = config.Bind("LocationObjects", "Prefabs", "Beehive",
 				"Prefabs to put back. Only objects the world itself generated in a location or village room are ever recreated, never player-built ones. Comma separated. Needs a restart.");
+
+			ZonesEnabled = config.Bind("Zones", "Enabled", false,
+				"Generate a zone players have been in again, as the world first made it, once nobody has been near it for IdleHours: trees, rocks, ore deposits, bushes, pickables, the location with its buildings, chests, creatures and dungeon, and the ground -- as if no player had ever been there. Never a zone with anything of a player's in it or within PlayerBuildRadius (pieces, tombstones, ships, carts, portals, items a player dropped, tamed creatures, item stands holding something, cultivated or paved ground), never a protected location. Unlike the rest this deletes and creates objects, so it is off until switched on. Needs a restart.");
+			ZonesDryRun = config.Bind("Zones", "DryRun", true,
+				"Only log which zones would be generated again and what they hold; change nothing. General.DryRun does the same for everything.");
+			ZonesIdleHours = config.Bind("Zones", "IdleHours", 72f,
+				"Real hours nobody may have been near a zone (PresenceRadiusZones) before it is generated again, counted from this feature's first run at the earliest.");
+			ZonesPerPass = config.Bind("Zones", "PerPass", 8,
+				"Most zones generated again per pass (every CheckIntervalMinutes); each takes a few tens of milliseconds of one frame.");
+			ZonesGraceMinutes = config.Bind("Zones", "GraceMinutes", 30f,
+				"Minutes after a start before any zone is generated again: who was near while the server was off is not known, and players coming back need time to get near their places.");
+			ZonesProtected = config.Bind("Zones", "ProtectedLocations",
+				"StartTemple,Eikthyrnir,GDKing,Bonemass,Dragonqueen,GoblinKing,Mistlands_DvergrBossEntrance1,FaderLocation,Vendor_BlackForest,Hildir_camp,BogWitch_Camp,Hildir_crypt,Hildir_cave,Hildir_plainsfortress",
+				"Locations whose zone is never generated again, besides every location the game places only once. Comma separated. Needs a restart.");
 
 			TerrainEnabled = config.Bind("Terrain", "Enabled", true,
 				"Let dug, raised, levelled and paved ground slowly return to the land's own shape once the area has been left alone. Ground around a player base (anything the game counts as a base: workbench, forge, stonecutter ... and wards) is left as it is; when the base is gone, so is the protection.");

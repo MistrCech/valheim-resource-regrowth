@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using UnityEngine;
 
 namespace ResourceRegrowth
 {
@@ -21,6 +22,20 @@ namespace ResourceRegrowth
 		private readonly string path;
 		private readonly Dictionary<Vector2s, DateTime> lastSeen = new Dictionary<Vector2s, DateTime>();
 		private readonly Dictionary<string, DateTime> depletedSince = new Dictionary<string, DateTime>();
+		// Zone reset: zones a player has been in since they were last generated, and since when.
+		private readonly Dictionary<Vector2s, DateTime> visited = new Dictionary<Vector2s, DateTime>();
+		// Zone reset: a location's rotation to give it again when its zone is next generated.
+		private readonly Dictionary<Vector2s, KeyValuePair<int, Quaternion>> keepRotation = new Dictionary<Vector2s, KeyValuePair<int, Quaternion>>();
+
+		public DateTime? ZonesFirstRun { get; set; }
+		// Zone reset: zones where players planted saplings (once grown, a tree has no mark of its planter).
+		private readonly HashSet<Vector2s> planted = new HashSet<Vector2s>();
+		/*
+			Since when presence is known completely: zone entries are forgotten after a while, and a zone
+			without one was not seen after this. Only moves forward; older versions kept IdleHours.
+		*/
+		public DateTime PresenceKnownSince { get; set; }
+		public bool PresenceKnownLoaded { get; private set; }
 
 		public DateTime FirstRun { get; private set; }
 		public string FilePath => path;
@@ -59,6 +74,25 @@ namespace ResourceRegrowth
 						case "depleted":
 							depletedSince[f[1]] = Parse(f[2]);
 							break;
+						case "visited":
+							visited[new Vector2s(int.Parse(f[1], CultureInfo.InvariantCulture), int.Parse(f[2], CultureInfo.InvariantCulture))] = Parse(f[3]);
+							break;
+						case "zonesfirstrun":
+							ZonesFirstRun = Parse(f[1]);
+							break;
+						case "presencesince":
+							PresenceKnownSince = Parse(f[1]);
+							PresenceKnownLoaded = true;
+							break;
+						case "planted":
+							planted.Add(new Vector2s(int.Parse(f[1], CultureInfo.InvariantCulture), int.Parse(f[2], CultureInfo.InvariantCulture)));
+							break;
+						case "keeprotation":
+							keepRotation[new Vector2s(int.Parse(f[1], CultureInfo.InvariantCulture), int.Parse(f[2], CultureInfo.InvariantCulture))] = new KeyValuePair<int, Quaternion>(
+								int.Parse(f[3], CultureInfo.InvariantCulture),
+								new Quaternion(float.Parse(f[4], CultureInfo.InvariantCulture), float.Parse(f[5], CultureInfo.InvariantCulture),
+									float.Parse(f[6], CultureInfo.InvariantCulture), float.Parse(f[7], CultureInfo.InvariantCulture)));
+							break;
 					}
 				}
 				catch (Exception)
@@ -93,6 +127,21 @@ namespace ResourceRegrowth
 					depletedSince[key] = now;
 				}
 			}
+			if (ZonesFirstRun.HasValue && ZonesFirstRun.Value > now)
+			{
+				ZonesFirstRun = now;
+			}
+			if (PresenceKnownSince > now)
+			{
+				PresenceKnownSince = now;
+			}
+			foreach (Vector2s zone in new List<Vector2s>(visited.Keys))
+			{
+				if (visited[zone] > now)
+				{
+					visited[zone] = now;
+				}
+			}
 		}
 
 		public void Save()
@@ -109,6 +158,24 @@ namespace ResourceRegrowth
 			foreach (KeyValuePair<string, DateTime> entry in depletedSince)
 			{
 				lines.Add($"depleted {entry.Key} {Format(entry.Value)}");
+			}
+			if (ZonesFirstRun.HasValue)
+			{
+				lines.Add("zonesfirstrun " + Format(ZonesFirstRun.Value));
+			}
+			lines.Add("presencesince " + Format(PresenceKnownSince));
+			foreach (Vector2s zone in planted)
+			{
+				lines.Add($"planted {zone.x} {zone.y}");
+			}
+			foreach (KeyValuePair<Vector2s, DateTime> zone in visited)
+			{
+				lines.Add($"visited {zone.Key.x} {zone.Key.y} {Format(zone.Value)}");
+			}
+			foreach (KeyValuePair<Vector2s, KeyValuePair<int, Quaternion>> entry in keepRotation)
+			{
+				Quaternion q = entry.Value.Value;
+				lines.Add(string.Format(CultureInfo.InvariantCulture, "keeprotation {0} {1} {2} {3:R} {4:R} {5:R} {6:R}", entry.Key.x, entry.Key.y, entry.Value.Key, q.x, q.y, q.z, q.w));
 			}
 			string temp = path + ".tmp";
 			File.WriteAllLines(temp, lines);
@@ -131,6 +198,38 @@ namespace ResourceRegrowth
 		public bool SeenSince(Vector2s zone, DateTime since)
 		{
 			return lastSeen.TryGetValue(zone, out DateTime time) && time >= since;
+		}
+
+		// Zone reset bookkeeping.
+		public void MarkVisited(Vector2s zone, DateTime now)
+		{
+			if (!visited.ContainsKey(zone))
+			{
+				visited[zone] = now;
+			}
+		}
+
+		public IEnumerable<KeyValuePair<Vector2s, DateTime>> Visited => visited;
+		public void MarkPlanted(Vector2s zone) => planted.Add(zone);
+		public bool IsPlanted(Vector2s zone) => planted.Contains(zone);
+		public int PlantedCount => planted.Count;
+
+		public bool TryLastSeen(Vector2s zone, out DateTime time) => lastSeen.TryGetValue(zone, out time);
+		public int VisitedCount => visited.Count;
+		public void ForgetVisit(Vector2s zone) => visited.Remove(zone);
+
+		public void KeepRotation(Vector2s zone, int location, Quaternion rotation) => keepRotation[zone] = new KeyValuePair<int, Quaternion>(location, rotation);
+
+		public bool TakeRotation(Vector2s zone, int location, out Quaternion rotation)
+		{
+			rotation = Quaternion.identity;
+			if (!keepRotation.TryGetValue(zone, out KeyValuePair<int, Quaternion> kept) || kept.Key != location)
+			{
+				return false;
+			}
+			keepRotation.Remove(zone);
+			rotation = kept.Value;
+			return true;
 		}
 
 		public DateTime LastSeen(Vector2s zone)
