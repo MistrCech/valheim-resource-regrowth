@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.2] - 2026-10-10
+
+### Fixed
+
+- `[Zones]`: a big rock, ore deposit or tree the game makes again no longer comes back over a player's
+  piece standing where it was mined out or felled. Besides the 4 m around every piece (2 m for small
+  things), an object whose colliders' bounds reach within 2 m of a piece now counts as beside it: the
+  game's new copy goes and the old state stays. Measured in the game with rays: of 329 rocks around one
+  mountain spot, 38 cover the ground farther than 4 m from where they stand, a mountain rock up to 23 m.
+  Tested on a copy of a live world with players' things far from any workbench (a chest with items, a
+  sign, a cart, a tombstone, a carried sword on the ground, a tamed wolf, a tagged portal, a chest put
+  4.9 m from a mined-out mountain rock's centre, inside its collider's bounds): after the reset every one
+  stood where it was with its data unchanged, the zone's ground record kept its bytes, and the rock 0.7.1
+  brought back there stayed away.
+
 ## [0.7.1] - 2026-10-10
 
 ### Changed

@@ -97,9 +97,11 @@ Players' things stay exactly where they are: pieces they built (also portals, be
 ships and carts, items a player has carried (an item remembers having been in a bag), tamed creatures,
 and the world's chests, barrels and stands holding something of theirs (the old one stays, the game's
 new copy goes). Beside a piece they built or a tombstone nothing changes -- within 4 m for trees, rocks,
-buildings and chests, 2 m for smaller things the game's new copies go and the old ones stay -- so no
-tree grows through a wall and nothing they kept by their walls goes. A zone with their pieces in it
-keeps its ground record (Terrain regrowth deals with it, with its own protections).
+buildings and chests, 2 m for smaller things, and wherever the colliders of a big rock, deposit or tree
+reach within 2 m of one, the game's new copies go and the old ones stay -- so no tree grows through a
+wall, nothing they kept by their walls goes, and a mountain rock (its stone covers the ground up to 23 m
+from its centre) does not come back over a chest built where it was mined out. A zone with their pieces
+in it keeps its ground record (Terrain regrowth deals with it, with its own protections).
 
 Never generated again:
 

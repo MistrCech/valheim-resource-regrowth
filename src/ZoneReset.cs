@@ -35,9 +35,10 @@ namespace ResourceRegrowth
 		Players' things stay where they are, untouched: pieces they built, tombstones, ships and carts,
 		items a player has carried (ItemData.m_pickedUp), tamed creatures, and the world's chests, barrels
 		and stands holding something of theirs (the old one stays, the new copy goes). What the game makes
-		again within 4 m of a piece they built (2 m for small things) goes, so no tree grows through a wall,
-		and the ground's record of a zone with their pieces in it stays (Terrain regrowth, with its own
-		protections, deals with it).
+		again within 4 m of a piece they built (2 m for small things), or reaching a piece with its
+		colliders, goes, so no tree grows through a wall and no rock comes back over a chest standing
+		where it was mined out; and the ground's record of a zone with their pieces in it stays (Terrain
+		regrowth, with its own protections, deals with it).
 
 		Never generated again:
 		- a zone with a workbench in it or within PlayerBuildRadius of it: someone's base. Of players'
@@ -651,7 +652,8 @@ namespace ResourceRegrowth
 			Beside a piece a player built or a tombstone nothing changes: what the game made again there goes
 			before the old objects are matched, and the old ones stay -- within 4 m for trees, rocks,
 			buildings and chests, 2 m for anything smaller, on the same side of a dungeon's floor
-			(interiors are 5000 m up). Bookkeeping (proxy, zone controller, dungeon generator) is exempt.
+			(interiors are 5000 m up), and wherever a big object's colliders reach (OverBuild).
+			Bookkeeping (proxy, zone controller, dungeon generator) is exempt.
 		*/
 		private List<Vector3> BuildsAround(Vector2s zone)
 		{
@@ -677,7 +679,8 @@ namespace ResourceRegrowth
 				return false;
 			}
 			Vector3 p = zdo.GetPosition();
-			float reach = bigPrefabs.Contains(prefab) ? 4f : 2f;
+			bool big = bigPrefabs.Contains(prefab);
+			float reach = big ? 4f : 2f;
 			foreach (Vector3 b in near)
 			{
 				float x = b.x - p.x, z = b.z - p.z;
@@ -686,7 +689,133 @@ namespace ResourceRegrowth
 					return true;
 				}
 			}
+			return big && OverBuild(zdo, prefab, p, near);
+		}
+
+		/*
+			A big object can reach farther than 4 m from where it stands. Measured in the game with rays
+			straight down: of 329 rocks around one mountain spot, 38 cover the ground farther than 4 m from
+			their centre, a mountain rock (rock1_mountain) up to 23 m. Where one was mined out a player can
+			build more than 4 m from its centre and still where it comes back. A build inside the bounds of
+			the object's colliders, grown by FootprintMargin all round, counts as beside it too: the boxes
+			are larger than the rock, which only keeps more as it was.
+		*/
+		private const float FootprintMargin = 2f;
+
+		private bool OverBuild(ZDO zdo, int prefab, Vector3 p, List<Vector3> near)
+		{
+			Footprint footprint = FootprintOf(prefab);
+			if (footprint.boxes.Count == 0)
+			{
+				return false;
+			}
+			Vector3 scale = ScaleOf(zdo, footprint.rootScale);
+			float most = footprint.reach * Mathf.Max(scale.x, scale.z) + FootprintMargin;
+			if (most <= 4f)
+			{
+				return false;
+			}
+			Quaternion back = Quaternion.Inverse(zdo.GetRotation());
+			Vector3 grow = new Vector3(2f * FootprintMargin / scale.x, 2f * FootprintMargin / scale.y, 2f * FootprintMargin / scale.z);
+			foreach (Vector3 b in near)
+			{
+				float x = b.x - p.x, z = b.z - p.z;
+				if (x * x + z * z > most * most)
+				{
+					continue;
+				}
+				Vector3 local = back * (b - p);
+				local = new Vector3(local.x / scale.x, local.y / scale.y, local.z / scale.z);
+				foreach (Bounds box in footprint.boxes)
+				{
+					Bounds grown = box;
+					grown.Expand(grow);
+					if (grown.Contains(local))
+					{
+						return true;
+					}
+				}
+			}
 			return false;
+		}
+
+		// A prefab's solid colliders as boxes in its root's space (before the instance's scale), how far they reach from the root horizontally, and the root's own scale.
+		private class Footprint
+		{
+			public readonly List<Bounds> boxes = new List<Bounds>();
+			public float reach;
+			public Vector3 rootScale = Vector3.one;
+		}
+
+		private readonly Dictionary<int, Footprint> footprints = new Dictionary<int, Footprint>();
+
+		private Footprint FootprintOf(int prefab)
+		{
+			if (footprints.TryGetValue(prefab, out Footprint known))
+			{
+				return known;
+			}
+			Footprint footprint = new Footprint();
+			footprints[prefab] = footprint;
+			GameObject asset = ZNetScene.instance.GetPrefab(prefab);
+			if (!asset)
+			{
+				return footprint;
+			}
+			footprint.rootScale = asset.transform.localScale;
+			Matrix4x4 toRoot = asset.transform.worldToLocalMatrix;
+			foreach (Collider collider in asset.GetComponentsInChildren<Collider>(true))
+			{
+				if (!collider || collider.isTrigger)
+				{
+					continue;
+				}
+				Bounds own;
+				if (collider is BoxCollider box)
+				{
+					own = new Bounds(box.center, box.size);
+				}
+				else if (collider is SphereCollider sphere)
+				{
+					own = new Bounds(sphere.center, Vector3.one * sphere.radius * 2f);
+				}
+				else if (collider is CapsuleCollider capsule)
+				{
+					Vector3 size = Vector3.one * capsule.radius * 2f;
+					size[capsule.direction] = Mathf.Max(capsule.height, capsule.radius * 2f);
+					own = new Bounds(capsule.center, size);
+				}
+				else if (collider is MeshCollider mesh && mesh.sharedMesh)
+				{
+					own = mesh.sharedMesh.bounds;
+				}
+				else
+				{
+					continue;
+				}
+				Matrix4x4 m = toRoot * collider.transform.localToWorldMatrix;
+				Bounds inRoot = new Bounds(m.MultiplyPoint3x4(own.center), Vector3.zero);
+				for (int i = 0; i < 8; i++)
+				{
+					Vector3 corner = m.MultiplyPoint3x4(own.center + Vector3.Scale(own.extents, new Vector3((i & 1) == 0 ? -1f : 1f, (i & 2) == 0 ? -1f : 1f, (i & 4) == 0 ? -1f : 1f)));
+					inRoot.Encapsulate(corner);
+					footprint.reach = Mathf.Max(footprint.reach, new Vector2(corner.x, corner.z).magnitude);
+				}
+				footprint.boxes.Add(inRoot);
+			}
+			return footprint;
+		}
+
+		// The scale an object stands at (ZNetView.LoadFields): its own, or the prefab's.
+		private static Vector3 ScaleOf(ZDO zdo, Vector3 rootScale)
+		{
+			Vector3 scale = zdo.GetVec3(ZDOVars.s_scaleHash, Vector3.zero);
+			if (scale != Vector3.zero)
+			{
+				return scale;
+			}
+			float scalar = zdo.GetFloat(ZDOVars.s_scaleScalarHash, 0f);
+			return scalar > 0f ? Vector3.one * scalar : rootScale;
 		}
 
 		private static bool IsGenerator(int prefab)
