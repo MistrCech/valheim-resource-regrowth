@@ -32,13 +32,18 @@ namespace ResourceRegrowth
 		dungeon's seed follows its generator's position to the metre). Tested: every location back at the
 		same rotation and position, every dungeon with the same rooms.
 
-		Never touched:
-		- a zone with anything of a player's in it or within PlayerBuildRadius of it: pieces they built
-		  (portals, beds, crops planted as pieces), tombstones, ships and carts, items a player has
-		  carried (ItemData.m_pickedUp, also inside the world's chests and barrels), tamed creatures, the
-		  world's item and armour stands holding something, cultivated ground, paved ground outside the
-		  zone's location;
-		- a zone where players have planted saplings (a grown tree has no mark of its planter);
+		Players' things stay where they are, untouched: pieces they built, tombstones, ships and carts,
+		items a player has carried (ItemData.m_pickedUp), tamed creatures, and the world's chests, barrels
+		and stands holding something of theirs (the old one stays, the new copy goes). What the game makes
+		again within 4 m of a piece they built (2 m for small things) goes, so no tree grows through a wall,
+		and the ground's record of a zone with their pieces in it stays (Terrain regrowth, with its own
+		protections, deals with it).
+
+		Never generated again:
+		- a zone with a workbench in it or within PlayerBuildRadius of it: someone's base;
+		- a zone with cultivated ground, or paved ground outside the zone's location (fields and roads
+		  would be overgrown), or where players have planted saplings (a grown tree has no mark of its
+		  planter);
 		- a protected location (Zones.ProtectedLocations and every location the game places only once),
 		  and a trader or anything within a protected location's reach in a neighbouring zone;
 		- a zone the server has loaded, or next to one it has, or anything in it a connected player owns;
@@ -91,13 +96,16 @@ namespace ResourceRegrowth
 		private readonly int terrainPrefab = Terrain.CompilerPrefab.GetStableHashCode();
 		private readonly int proxyPrefab;
 		private readonly int zoneCtrlPrefab;
+		private readonly int workbenchPrefab = "piece_workbench".GetStableHashCode();
+		private readonly HashSet<int> bigPrefabs = new HashSet<int>();
 		// ArmorStand slot keys: "<i>_item" (ArmorStand.InitKeys).
 		private static readonly int[] s_armorSlotKeys = Enumerable.Range(0, 16).Select(i => (i + "_item").GetStableHashCode()).ToArray();
 		private bool broken;
 		private bool announcedGrace;
 
-		// Collected by the pass that runs it: what of players' lies where, and each zone's ground record.
-		private readonly Dictionary<Vector2s, List<Vector3>> traces = new Dictionary<Vector2s, List<Vector3>>();
+		// Collected by the pass that runs it: players' workbenches, each zone's ground record; and, for a run, the pass's player pieces and tombstones.
+		private readonly Dictionary<Vector2s, List<Vector3>> workbenches = new Dictionary<Vector2s, List<Vector3>>();
+		private Dictionary<Vector2s, List<Vector3>> builds = new Dictionary<Vector2s, List<Vector3>>();
 		private readonly Dictionary<Vector2s, ZDO> terrain = new Dictionary<Vector2s, ZDO>();
 		// Zones that could not be done now (not ready, a neighbour loaded ...) wait a while before they are tried again.
 		private readonly Dictionary<Vector2s, DateTime> retryAfter = new Dictionary<Vector2s, DateTime>();
@@ -181,6 +189,11 @@ namespace ResourceRegrowth
 				{
 					debrisPrefabs.Add(destructible.m_spawnWhenDestroyed.name.GetStableHashCode());
 				}
+				if (prefab.GetComponent<TreeBase>() || prefab.GetComponent<Destructible>() || prefab.GetComponent<MineRock>() || prefab.GetComponent<MineRock5>()
+					|| prefab.GetComponent<WearNTear>() || prefab.GetComponent<Container>())
+				{
+					bigPrefabs.Add(hash);
+				}
 				kinds[hash] = KindOf(prefab);
 			}
 			protectedNames = new HashSet<string>(settings.ZonesProtected.Value.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0));
@@ -235,7 +248,7 @@ namespace ResourceRegrowth
 		// Called by the pass before it notes every object.
 		public void Clear()
 		{
-			traces.Clear();
+			workbenches.Clear();
 			terrain.Clear();
 		}
 
@@ -251,13 +264,12 @@ namespace ResourceRegrowth
 				// A sapling or crop a player planted: once grown it carries nothing of its planter, so the zone is remembered.
 				state.MarkPlanted(ZoneSystem.GetZone(zdo.GetPosition()));
 			}
-			// Chests are read only for the zones that are due (Collect): too dear for every object of every pass.
-			if (IsPlayers(zdo, prefab, readContainers: false))
+			if (prefab == workbenchPrefab && zdo.GetLong(ZDOVars.s_creator, 0L) != 0L)
 			{
 				Vector2s zone = ZoneSystem.GetZone(zdo.GetPosition());
-				if (!traces.TryGetValue(zone, out List<Vector3> list))
+				if (!workbenches.TryGetValue(zone, out List<Vector3> list))
 				{
-					traces[zone] = list = new List<Vector3>();
+					workbenches[zone] = list = new List<Vector3>();
 				}
 				list.Add(zdo.GetPosition());
 			}
@@ -275,7 +287,7 @@ namespace ResourceRegrowth
 			}
 			if (itemPrefabs.Contains(prefab))
 			{
-				return Carried(zdo);
+				return PlayersItems.Carried(zdo);
 			}
 			if (characterPrefabs.Contains(prefab))
 			{
@@ -291,49 +303,9 @@ namespace ResourceRegrowth
 			}
 			if (readContainers && containerPrefabs.Contains(prefab))
 			{
-				return HoldsCarried(zdo);
+				return PlayersItems.InContainer(zdo);
 			}
 			return false;
-		}
-
-		/*
-			ItemDrop.SaveToZDO: a version byte (109), then ItemData.Save -- durability (int), grid x, grid y,
-			world level, flags (bit 0: it has been in a player's bag). An item the world made and nobody
-			has loaded since has no data yet (ItemDrop.Start writes it): the world's.
-		*/
-		private static bool Carried(ZDO zdo)
-		{
-			byte[] data = zdo.GetByteArray(ZDOVars.s_itemData);
-			if (data == null)
-			{
-				return false;
-			}
-			if (data.Length < 9 || data[0] != 109)
-			{
-				return true;
-			}
-			return (data[8] & 1) != 0;
-		}
-
-		// A chest, barrel or crate of the world with anything in it that has been in a player's bag: someone's storage.
-		private static bool HoldsCarried(ZDO zdo)
-		{
-			byte[] items = zdo.GetByteArray(ZDOVars.s_items);
-			if (items == null)
-			{
-				return false;
-			}
-			try
-			{
-				Inventory inventory = new Inventory("zone reset", null, 16, 16);
-				inventory.Load(new ZPackage(items));
-				return inventory.GetAllItems().Any(item => item.m_pickedUp);
-			}
-			catch (Exception)
-			{
-				// Unreadable: kept, to be safe.
-				return true;
-			}
 		}
 
 		public bool TakeRotation(Vector2s zone, int location, out Quaternion rotation) => state.TakeRotation(zone, location, out rotation);
@@ -365,6 +337,7 @@ namespace ResourceRegrowth
 				Count(tally, "stopped after an error until restart");
 				yield break;
 			}
+			builds = blockers;
 			ZoneSystem zs = ZoneSystem.instance;
 			if (!state.ZonesFirstRun.HasValue)
 			{
@@ -392,7 +365,7 @@ namespace ResourceRegrowth
 					tally.waiting++;
 					continue;
 				}
-				string why = Blocked(zone, blockers);
+				string why = Blocked(zone);
 				if (why != null)
 				{
 					Count(tally, why);
@@ -457,7 +430,7 @@ namespace ResourceRegrowth
 		}
 
 		// Why a zone must stay as it is, or null.
-		private string Blocked(Vector2s zone, Dictionary<Vector2s, List<Vector3>> blockers)
+		private string Blocked(Vector2s zone)
 		{
 			ZoneSystem zs = ZoneSystem.instance;
 			bool hasLocation = zs.m_locationInstances.TryGetValue(zone, out ZoneSystem.LocationInstance instance) && instance.m_placed && instance.m_location != null;
@@ -473,10 +446,9 @@ namespace ResourceRegrowth
 			{
 				return "loaded";
 			}
-			float radius = Mathf.Max(0f, settings.PlayerBuildRadius.Value);
-			if (Near(blockers, zone, radius) || Near(traces, zone, radius))
+			if (Near(workbenches, zone, Mathf.Max(0f, settings.PlayerBuildRadius.Value)))
 			{
-				return "players' things in it or near";
+				return "a workbench in it or near";
 			}
 			if (terrain.TryGetValue(zone, out ZDO ground))
 			{
@@ -688,9 +660,21 @@ namespace ResourceRegrowth
 			try
 			{
 				HashSet<ZDO> gone = new HashSet<ZDO>();
+				List<Vector3> nearBuilds = BuildsAround(zone);
+				// Beside players' builds nothing changes: the new copies go first, the old ones stay.
+				int around = 0;
+				foreach (ZDO zdo in made)
+				{
+					if (BesideBuild(zdo, nearBuilds))
+					{
+						Delete(zdo, gone);
+						around++;
+					}
+				}
 				int replaced = Replace(zone, made, old, gone, out int beyond, out int refused);
 				List<Vector3> guarded = ProtectedNear(zone);
-				int cleared = 0, kept = 0;
+				bool built = old.Any(z => z.GetLong(ZDOVars.s_creator, 0L) != 0L);
+				int cleared = 0, kept = 0, theirs = 0;
 				Dictionary<string, int> keptNames = new Dictionary<string, int>();
 				foreach (ZDO zdo in old)
 				{
@@ -700,7 +684,18 @@ namespace ResourceRegrowth
 					}
 					Vector3 p = zdo.GetPosition();
 					int prefab = zdo.GetPrefab();
-					if (OnlyTheZoneMakes(prefab, p.y > 3000f) && !traderPrefabs.Contains(prefab) && !guarded.Any(g => Horizontal(g, p) <= g.y))
+					if (IsPlayers(zdo, prefab, readContainers: true))
+					{
+						theirs++;
+						continue;
+					}
+					if (BesideBuild(zdo, nearBuilds))
+					{
+						kept++;
+						continue;
+					}
+					if (OnlyTheZoneMakes(prefab, p.y > 3000f) && !traderPrefabs.Contains(prefab) && !guarded.Any(g => Horizontal(g, p) <= g.y)
+						&& !(prefab == terrainPrefab && built))
 					{
 						Delete(zdo, gone);
 						cleared++;
@@ -717,7 +712,8 @@ namespace ResourceRegrowth
 				if (tally.logged++ < settings.LogDetailsPerPass.Value)
 				{
 					RegrowthPlugin.Log.LogInfo($"Zones: generated {where} again, idle {idle:0.#} h: the game made {made.Count} objects; {replaced} replaced the old ones in their places"
-						+ (beyond > 0 ? $" ({beyond} of them over the zone's edge)" : "") + (refused > 0 ? $", {refused} new ones removed again where the old one was in use" : "")
+						+ (beyond > 0 ? $" ({beyond} of them over the zone's edge)" : "") + (refused > 0 ? $", {refused} new ones removed again where the old one holds a player's things or is in use" : "")
+						+ (around > 0 ? $", {around} new ones removed again beside players' builds" : "") + (theirs > 0 ? $", {theirs} of players' things left as they were" : "")
 						+ $", {cleared} old ones left over went ({Kinds(old.Where(gone.Contains))})"
 						+ (kept > 0 ? $", {kept} kept as maybe a neighbour's ({string.Join(", ", keptNames.OrderByDescending(k => k.Value).Take(4).Select(k => $"{k.Value} {k.Key}"))})" : "") + ".");
 				}
@@ -729,6 +725,54 @@ namespace ResourceRegrowth
 				tally.reset++;
 				RegrowthPlugin.Log.LogError($"Zones: {where} was generated again but sorting out its old objects failed; zone resets stop until restart: {e}");
 			}
+		}
+
+		/*
+			Beside a piece a player built or a tombstone nothing changes: what the game made again there goes
+			before the old objects are matched, and the old ones stay -- within 4 m for trees, rocks,
+			buildings and chests, 2 m for anything smaller, on the same side of a dungeon's floor
+			(interiors are 5000 m up). Bookkeeping (proxy, zone controller, dungeon generator) is exempt.
+		*/
+		private List<Vector3> BuildsAround(Vector2s zone)
+		{
+			List<Vector3> near = new List<Vector3>();
+			for (int dy = -1; dy <= 1; dy++)
+			{
+				for (int dx = -1; dx <= 1; dx++)
+				{
+					if (builds.TryGetValue(new Vector2s(zone.x + dx, zone.y + dy), out List<Vector3> list))
+					{
+						near.AddRange(list);
+					}
+				}
+			}
+			return near;
+		}
+
+		private bool BesideBuild(ZDO zdo, List<Vector3> near)
+		{
+			int prefab = zdo.GetPrefab();
+			if (near.Count == 0 || prefab == proxyPrefab || prefab == zoneCtrlPrefab || prefab == terrainPrefab || IsGenerator(prefab) || zdo.GetLong(ZDOVars.s_creator, 0L) != 0L)
+			{
+				return false;
+			}
+			Vector3 p = zdo.GetPosition();
+			float reach = bigPrefabs.Contains(prefab) ? 4f : 2f;
+			foreach (Vector3 b in near)
+			{
+				float x = b.x - p.x, z = b.z - p.z;
+				if (x * x + z * z <= reach * reach && Mathf.Abs(b.y - p.y) < 20f)
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		private static bool IsGenerator(int prefab)
+		{
+			GameObject asset = ZNetScene.instance.GetPrefab(prefab);
+			return asset && asset.GetComponent<DungeonGenerator>();
 		}
 
 		// Remove what a failed attempt made, and mark the zone generated and its location placed again; no old object was touched.
@@ -847,8 +891,8 @@ namespace ResourceRegrowth
 		/*
 			Each object made now replaces the old one of its prefab standing in its place, in this zone or a
 			neighbouring one (a deleted object stays in its sector until the deletions go out at the end of
-			the frame, so `gone` keeps track). Where the old one beyond the zone's edge is in use, or holds a
-			player's things, the new one goes instead. Returns how many replaced; `beyond`: of them outside
+			the frame, so `gone` keeps track). Where the old one holds a player's things, or is in use
+			beyond the zone's edge, the new one goes instead. Returns how many replaced; `beyond`: of them outside
 			the zone; `refused`: new ones removed again.
 		*/
 		private int Replace(Vector2s zone, List<ZDO> made, List<ZDO> old, HashSet<ZDO> gone, out int beyond, out int refused)
@@ -861,6 +905,10 @@ namespace ResourceRegrowth
 			int replaced = 0;
 			foreach (ZDO zdo in made)
 			{
+				if (gone.Contains(zdo))
+				{
+					continue;
+				}
 				Vector3 p = zdo.GetPosition();
 				Vector2s at = ZoneSystem.GetZone(p);
 				bool here = at.x == zone.x && at.y == zone.y;
@@ -892,10 +940,10 @@ namespace ResourceRegrowth
 						continue;
 					}
 					long owner = candidate.GetOwner();
-					if (!here && (IsPlayers(candidate, prefab, readContainers: true) || (owner != 0L && owner != server && ZNet.instance.GetPeer(owner) != null)
-						|| ZNetScene.instance.FindInstance(candidate)))
+					if (IsPlayers(candidate, prefab, readContainers: true) || (!here && ((owner != 0L && owner != server && ZNet.instance.GetPeer(owner) != null)
+						|| ZNetScene.instance.FindInstance(candidate))))
 					{
-						// The old one must stay: the new one would stand next to it.
+						// The old one must stay -- it holds a player's things, or is in use beyond the edge: the new one would stand next to it.
 						Delete(zdo, gone);
 						refused++;
 						break;
@@ -913,10 +961,10 @@ namespace ResourceRegrowth
 		}
 
 		/*
-			The zone's objects, or null with the reason when something must stop it: anything of a
-			player's (also in the world's chests), anything loaded or owned by a connected player, the zone
-			or a neighbouring one loaded (objects there may be replaced too), a location without its proxy
-			(its rotation would be lost) or a proxy without its location.
+			The zone's objects, or null with the reason when something must stop it: a workbench (placed
+			since the pass looked), anything loaded or owned by a connected player, the zone or a
+			neighbouring one loaded (objects there may be replaced too), a location without its proxy (its
+			rotation would be lost) or a proxy without its location.
 		*/
 		private List<ZDO> Collect(Vector2s zone, bool hasLocation, out string refusal, out ZDO proxy)
 		{
@@ -940,9 +988,9 @@ namespace ResourceRegrowth
 			foreach (ZDO zdo in objects)
 			{
 				int prefab = zdo.GetPrefab();
-				if (IsPlayers(zdo, prefab, readContainers: true))
+				if (prefab == workbenchPrefab && zdo.GetLong(ZDOVars.s_creator, 0L) != 0L)
 				{
-					refusal = "players' things in it";
+					refusal = "a workbench in it";
 					return null;
 				}
 				long owner = zdo.GetOwner();

@@ -4,7 +4,7 @@ A server-side [BepInEx](https://github.com/BepInEx/BepInEx) plugin for Valheim 1
 It brings one-time world content back once an area has been left alone for a while:
 
 - **Surtling core stands** get their core back.
-- **Treasure chests** (never player-built ones) are restocked with fresh loot, whatever was left in them replaced.
+- **Treasure chests** (never player-built ones, and never one holding something of a player's) are restocked with fresh loot, whatever was left in them replaced.
 - **One-time creature spawners** (dungeons, camps, caves) spawn their creature again.
 - A **location regrows as a whole**: a dungeon with its entrance, a camp, a village or a ruin comes
   back all at once -- every core, every creature and every chest in it.
@@ -15,7 +15,7 @@ It brings one-time world content back once an area has been left alone for a whi
 - **Zones** (off by default): a zone players have been in is **generated again by the game itself**
   once nobody has been near it for three days -- trees, rocks and ore deposits, bushes, pickables, the
   location with its buildings, chests, creatures and dungeon, and the ground -- as if no player had
-  ever been there. Never where anything of a player's is.
+  ever been there. Never at a base (a workbench); players' things stay as they are.
 
 Players need nothing: vanilla clients work. The plugin depends on BepInEx and nothing else. It
 patches one game method, and only with Zones switched on (see Zones).
@@ -93,15 +93,20 @@ same rooms. Because old objects are matched to what the game made object by obje
 dungeon that reaches over the zone's edge (a boar runestone's spawners, a crypt's rooms) is replaced
 there too, and a neighbour's objects reaching into the zone stay.
 
+Players' things stay exactly where they are: pieces they built (also portals, beds, crops), tombstones,
+ships and carts, items a player has carried (an item remembers having been in a bag), tamed creatures,
+and the world's chests, barrels and stands holding something of theirs (the old one stays, the game's
+new copy goes). Beside a piece they built or a tombstone nothing changes -- within 4 m for trees, rocks,
+buildings and chests, 2 m for smaller things the game's new copies go and the old ones stay -- so no
+tree grows through a wall and nothing they kept by their walls goes. A zone with their pieces in it
+keeps its ground record (Terrain regrowth deals with it, with its own protections).
+
 Never generated again:
 
-- a zone with anything of a player's in it or within `PlayerBuildRadius` (48 m) of it: pieces they
-  built (also portals, beds, crops), tombstones, ships and carts, items a player has carried -- also
-  inside the world's chests and barrels (an item remembers it has been in a bag) --, tamed creatures,
-  item and armour stands of the world holding something, cultivated ground, paved ground outside the
-  zone's location;
-- a zone where players have planted saplings (a grown tree carries nothing of its planter, so the zone
-  is remembered from the sapling);
+- a zone with a **workbench** in it or within `PlayerBuildRadius` (48 m) of it: someone's base;
+- a zone with cultivated ground, or paved ground outside the zone's location (fields and roads would be
+  overgrown), or where players have planted saplings (a grown tree carries nothing of its planter, so
+  the zone is remembered from the sapling);
 - a protected location (`ProtectedLocations`: the start temple with the guardian stones, boss altars,
   traders, Hildir's dungeons) and every location the game places only once; nothing left over within a
   protected location's reach in a neighbouring zone goes, and no trader;

@@ -2,6 +2,11 @@
 
 ## [0.7.0] - 2026-10-10
 
+### Changed
+
+- A treasure chest holding anything that has been in a player's bag is someone's storage and is never
+  restocked (it used to be emptied and filled afresh like any chest a player had been near).
+
 ### Added
 
 - `[Zones]` (off by default, `DryRun` on by default): a zone players have been in is generated again
@@ -16,11 +21,13 @@
   rotation it had: the game draws it from an unseeded random number, so it is read from the
   location's proxy (rounded to the game's 22.5-degree step, as the save truncates Euler angles to half
   a degree) and given back by a prefix on `ZoneSystem.SpawnLocation` -- the plugin's first game patch,
-  applied only with Zones switched on. Never touched: zones with anything of a player's in them or
-  within `PlayerBuildRadius` (pieces incl. portals, ships, carts and crops; tombstones; items a player
-  has carried; tamed creatures; world item and armour stands holding something; cultivated ground and
-  paved ground outside the location; the world's chests and barrels holding anything that has been in
-  a player's bag), zones where players planted saplings, protected locations (`ProtectedLocations`,
+  applied only with Zones switched on. Players' things are never deleted and stay where they are
+  (pieces incl. portals, ships, carts and crops; tombstones; items a player has carried; tamed
+  creatures; the world's chests, barrels and stands holding something of theirs -- the old one stays,
+  the new copy goes); beside their pieces and tombstones nothing changes (4 m, 2 m for small things),
+  and a zone with their pieces keeps its ground record. Never generated again: zones with a workbench
+  in them or within `PlayerBuildRadius` (a base), cultivated ground or paved ground outside the
+  location, zones where players planted saplings, protected locations (`ProtectedLocations`,
   plus every location the game places only once, and what of them reaches into a neighbour), zones
   loaded on the server or next to one that is, and the first `GraceMinutes` (30) after a start. A
   generation that fails or throws is undone: nothing old is deleted before the game has made the zone
@@ -29,17 +36,17 @@
   and only moves forward (`presencesince` in the state); at most `PerPass` zones per pass, one per
   frame, a zone that cannot be done now waiting an hour.
 
-Tested on a copy of the live world (9 October) with every zone due at once: 1108 of 1190 zones were
-generated again, 0 exceptions, about 9 ms of work per zone; 82 were kept (72 with players' things in
-or near them, 6 protected locations, 3 fields, 1 with players' saplings) and stayed unchanged object
-for object; all 263 locations came back with the same rotation and position and all 27 dungeons with
-the same rooms (the first tries lost five crypts and a troll cave's interior to guessed ownership and
-reused ZDO objects, and changed three dungeons' rooms through the half-degree truncation -- all fixed
-before release); zones without a location matched a fresh world of the same seed in 34 of 35 changed
-cases; objects players had removed came back (rocks, trees, obsidian and copper deposits, beehives,
-bone piles). A dungeon generation made to throw was undone: the zone and its neighbours stayed as they
-were and resets stopped. With the defaults, the first run counted all 1190 zones as visited and
-generated none (72 h to go). A review by three
+Tested on a copy of the live world (9 October) with every zone due at once: 1156 of 1190 zones were
+generated again, 0 exceptions, about 8 ms of work per zone; 34 were kept (19 at a workbench, 8 fields,
+6 protected locations, 1 with players' saplings); all 663 objects of players' stayed exactly where they
+were (prefab and position to the centimetre); all 263 locations came back with the same rotation and
+position and all 27 dungeons with the same rooms (the first tries lost five crypts and a troll cave's
+interior to guessed ownership and reused ZDO objects, and changed three dungeons' rooms through the
+half-degree truncation -- all fixed before release); zones without a location matched a fresh world of
+the same seed in 41 of 45 changed cases; objects players had removed came back (rocks, trees, obsidian
+and copper deposits, beehives, bone piles). A dungeon generation made to throw was undone: the zone and
+its neighbours stayed as they were and resets stopped. With the defaults, the first run counted all
+1190 zones as visited and generated none (72 h to go). A review by three
 independent readers found that the world's chests holding players' things, trees grown from players'
 saplings, a failed generation (no undo), a trader reaching into a neighbouring zone, items the world
 placed but nobody loaded yet (read as carried), presence forgotten while Zones were off, wasted

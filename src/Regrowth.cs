@@ -1041,9 +1041,10 @@ namespace ResourceRegrowth
 
 		// Player-built chests are never touched, a chest vanilla has not filled yet has nothing to restock,
 		// and chests from cheats are left alone.
+		// A chest holding anything that has been in a player's bag is someone's storage: never restocked.
 		private static bool IsRestockable(ZDO zdo)
 		{
-			return zdo.GetLong(ZDOVars.s_creator, 0L) == 0L && zdo.GetBool(ZDOVars.s_addedDefaultItems) && !zdo.GetBool(ZDOVars.s_cheated);
+			return zdo.GetLong(ZDOVars.s_creator, 0L) == 0L && zdo.GetBool(ZDOVars.s_addedDefaultItems) && !zdo.GetBool(ZDOVars.s_cheated) && !PlayersItems.InContainer(zdo);
 		}
 
 		private static bool IsEmpty(ZDO zdo)
