@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.1] - 2026-10-10
+
+### Changed
+
+- `[Zones]`: only a workbench (in the zone or within `PlayerBuildRadius`) keeps a zone as it is.
+  Cultivated ground, paved ground and the trees players planted no longer do: away from a workbench they
+  go with the reset like the rest of the ground. A zone with players' pieces in it (crops among them)
+  still keeps its ground record.
+
 ## [0.7.0] - 2026-10-10
 
 ### Changed

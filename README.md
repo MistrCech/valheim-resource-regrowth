@@ -103,10 +103,8 @@ keeps its ground record (Terrain regrowth deals with it, with its own protection
 
 Never generated again:
 
-- a zone with a **workbench** in it or within `PlayerBuildRadius` (48 m) of it: someone's base;
-- a zone with cultivated ground, or paved ground outside the zone's location (fields and roads would be
-  overgrown), or where players have planted saplings (a grown tree carries nothing of its planter, so
-  the zone is remembered from the sapling);
+- a zone with a **workbench** in it or within `PlayerBuildRadius` (48 m) of it: someone's base. Of
+  players' things only a workbench keeps a zone as it is;
 - a protected location (`ProtectedLocations`: the start temple with the guardian stones, boss altars,
   traders, Hildir's dungeons) and every location the game places only once; nothing left over within a
   protected location's reach in a neighbouring zone goes, and no trader;
@@ -114,8 +112,9 @@ Never generated again:
 - anything in the first `GraceMinutes` (30) after a start: who was near while the server was off is
   not known.
 
-Dirt paths, dug and raised ground outside fields and paved roads go with the reset, as they do with
-Terrain regrowth.
+Fields, paved roads, dirt paths, dug and raised ground and the trees players planted go with the reset
+unless a workbench is near: whoever wants a road or a field kept puts a workbench by it. A zone with
+players' pieces in it (crops are pieces) keeps its ground record, so a field with crops on it stays a field.
 
 If the game cannot generate the zone now, or throws while doing it, nothing old has been deleted
 yet: whatever the attempt made is removed, the zone is marked generated and its location placed again,

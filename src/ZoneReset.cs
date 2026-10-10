@@ -40,10 +40,9 @@ namespace ResourceRegrowth
 		protections, deals with it).
 
 		Never generated again:
-		- a zone with a workbench in it or within PlayerBuildRadius of it: someone's base;
-		- a zone with cultivated ground, or paved ground outside the zone's location (fields and roads
-		  would be overgrown), or where players have planted saplings (a grown tree has no mark of its
-		  planter);
+		- a zone with a workbench in it or within PlayerBuildRadius of it: someone's base. Of players'
+		  things only this keeps a zone as it is: fields, roads and the trees they planted go with the
+		  reset like the rest of the ground (a workbench by a road keeps it);
 		- a protected location (Zones.ProtectedLocations and every location the game places only once),
 		  and a trader or anything within a protected location's reach in a neighbouring zone;
 		- a zone the server has loaded, or next to one it has, or anything in it a connected player owns;
@@ -84,7 +83,6 @@ namespace ResourceRegrowth
 		private readonly HashSet<int> itemStandPrefabs = new HashSet<int>();
 		private readonly HashSet<int> armorStandPrefabs = new HashSet<int>();
 		private readonly HashSet<int> containerPrefabs = new HashSet<int>();
-		private readonly HashSet<int> plantPrefabs = new HashSet<int>();
 		private readonly HashSet<int> vegetationPrefabs = new HashSet<int>();
 		private readonly HashSet<int> debrisPrefabs = new HashSet<int>();
 		// Birds and fish: life the zone spawns that is neither a character nor an item.
@@ -103,10 +101,9 @@ namespace ResourceRegrowth
 		private bool broken;
 		private bool announcedGrace;
 
-		// Collected by the pass that runs it: players' workbenches, each zone's ground record; and, for a run, the pass's player pieces and tombstones.
+		// Collected by the pass that runs it: players' workbenches; and, for a run, the pass's player pieces and tombstones.
 		private readonly Dictionary<Vector2s, List<Vector3>> workbenches = new Dictionary<Vector2s, List<Vector3>>();
 		private Dictionary<Vector2s, List<Vector3>> builds = new Dictionary<Vector2s, List<Vector3>>();
-		private readonly Dictionary<Vector2s, ZDO> terrain = new Dictionary<Vector2s, ZDO>();
 		// Zones that could not be done now (not ready, a neighbour loaded ...) wait a while before they are tried again.
 		private readonly Dictionary<Vector2s, DateTime> retryAfter = new Dictionary<Vector2s, DateTime>();
 
@@ -166,10 +163,6 @@ namespace ResourceRegrowth
 				{
 					containerPrefabs.Add(hash);
 				}
-				if (prefab.GetComponent<Plant>())
-				{
-					plantPrefabs.Add(hash);
-				}
 				// What felling leaves: stumps, logs, half logs.
 				TreeBase tree = prefab.GetComponent<TreeBase>();
 				if (tree)
@@ -207,7 +200,7 @@ namespace ResourceRegrowth
 			Active = this;
 			RegrowthPlugin.Log.LogInfo($"Zones{(settings.ZonesDryRun.Value || settings.DryRun.Value ? " (dry run: nothing will be changed)" : "")}: a zone players have been in is generated again after {settings.ZonesIdleHours.Value:0.#} h with nobody near, "
 				+ $"at most {settings.ZonesPerPass.Value} per pass, none in the first {settings.ZonesGraceMinutes.Value:0} minutes after a start; protected locations: {string.Join(", ", protectedNames.OrderBy(n => n, StringComparer.Ordinal))}. "
-				+ $"Visited zones known: {state.VisitedCount}, zones with players' saplings: {state.PlantedCount}{(state.ZonesFirstRun.HasValue ? $", counting since {state.ZonesFirstRun.Value.ToLocalTime():yyyy-MM-dd HH:mm}" : "")}.");
+				+ $"Visited zones known: {state.VisitedCount}{(state.ZonesFirstRun.HasValue ? $", counting since {state.ZonesFirstRun.Value.ToLocalTime():yyyy-MM-dd HH:mm}" : "")}.");
 		}
 
 		private static string KindOf(GameObject prefab)
@@ -249,21 +242,10 @@ namespace ResourceRegrowth
 		public void Clear()
 		{
 			workbenches.Clear();
-			terrain.Clear();
 		}
 
 		public void Note(ZDO zdo, int prefab)
 		{
-			if (prefab == terrainPrefab)
-			{
-				terrain[ZoneSystem.GetZone(zdo.GetPosition())] = zdo;
-				return;
-			}
-			if (plantPrefabs.Contains(prefab) && zdo.GetLong(ZDOVars.s_creator, 0L) != 0L)
-			{
-				// A sapling or crop a player planted: once grown it carries nothing of its planter, so the zone is remembered.
-				state.MarkPlanted(ZoneSystem.GetZone(zdo.GetPosition()));
-			}
 			if (prefab == workbenchPrefab && zdo.GetLong(ZDOVars.s_creator, 0L) != 0L)
 			{
 				Vector2s zone = ZoneSystem.GetZone(zdo.GetPosition());
@@ -438,10 +420,6 @@ namespace ResourceRegrowth
 			{
 				return "protected location";
 			}
-			if (state.IsPlanted(zone))
-			{
-				return "planted by players";
-			}
 			if (zs.m_zones.ContainsKey(zone))
 			{
 				return "loaded";
@@ -449,14 +427,6 @@ namespace ResourceRegrowth
 			if (Near(workbenches, zone, Mathf.Max(0f, settings.PlayerBuildRadius.Value)))
 			{
 				return "a workbench in it or near";
-			}
-			if (terrain.TryGetValue(zone, out ZDO ground))
-			{
-				string paint = PlayersGround(ground, zone, hasLocation ? instance : default(ZoneSystem.LocationInstance), hasLocation);
-				if (paint != null)
-				{
-					return paint;
-				}
 			}
 			return null;
 		}
@@ -487,56 +457,6 @@ namespace ResourceRegrowth
 				}
 			}
 			return false;
-		}
-
-		// Cultivated ground anywhere, or paved ground outside the zone's location: players' fields and roads.
-		private static string PlayersGround(ZDO ground, Vector2s zone, ZoneSystem.LocationInstance instance, bool hasLocation)
-		{
-			byte[] bytes = ground.GetByteArray(ZDOVars.s_TCData);
-			if (bytes == null)
-			{
-				return null;
-			}
-			Terrain.Data data;
-			try
-			{
-				data = Terrain.Decode(bytes);
-			}
-			catch (Exception)
-			{
-				return "unreadable ground record";
-			}
-			int vertices = data.modifiedPaint.Length;
-			int width = Mathf.RoundToInt(Mathf.Sqrt(vertices)) - 1;
-			if (width <= 0 || (width + 1) * (width + 1) != vertices)
-			{
-				return "unreadable ground record";
-			}
-			Vector3 center = ZoneSystem.GetZonePos(zone);
-			float half = width * 0.5f;
-			float keep = hasLocation ? instance.m_location.m_exteriorRadius + 8f : -1f;
-			for (int i = 0; i < vertices; i++)
-			{
-				if (!data.modifiedPaint[i])
-				{
-					continue;
-				}
-				Color c = data.paintMask[i];
-				if (c.g > 0.5f)
-				{
-					return "cultivated ground";
-				}
-				if (c.b > 0.5f)
-				{
-					float x = center.x - half + i % (width + 1) - instance.m_position.x;
-					float z = center.z - half + i / (width + 1) - instance.m_position.z;
-					if (!hasLocation || x * x + z * z > keep * keep)
-					{
-						return "paved ground";
-					}
-				}
-			}
-			return null;
 		}
 
 		/*

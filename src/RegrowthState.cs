@@ -28,8 +28,6 @@ namespace ResourceRegrowth
 		private readonly Dictionary<Vector2s, KeyValuePair<int, Quaternion>> keepRotation = new Dictionary<Vector2s, KeyValuePair<int, Quaternion>>();
 
 		public DateTime? ZonesFirstRun { get; set; }
-		// Zone reset: zones where players planted saplings (once grown, a tree has no mark of its planter).
-		private readonly HashSet<Vector2s> planted = new HashSet<Vector2s>();
 		/*
 			Since when presence is known completely: zone entries are forgotten after a while, and a zone
 			without one was not seen after this. Only moves forward; older versions kept IdleHours.
@@ -83,9 +81,6 @@ namespace ResourceRegrowth
 						case "presencesince":
 							PresenceKnownSince = Parse(f[1]);
 							PresenceKnownLoaded = true;
-							break;
-						case "planted":
-							planted.Add(new Vector2s(int.Parse(f[1], CultureInfo.InvariantCulture), int.Parse(f[2], CultureInfo.InvariantCulture)));
 							break;
 						case "keeprotation":
 							keepRotation[new Vector2s(int.Parse(f[1], CultureInfo.InvariantCulture), int.Parse(f[2], CultureInfo.InvariantCulture))] = new KeyValuePair<int, Quaternion>(
@@ -164,10 +159,6 @@ namespace ResourceRegrowth
 				lines.Add("zonesfirstrun " + Format(ZonesFirstRun.Value));
 			}
 			lines.Add("presencesince " + Format(PresenceKnownSince));
-			foreach (Vector2s zone in planted)
-			{
-				lines.Add($"planted {zone.x} {zone.y}");
-			}
 			foreach (KeyValuePair<Vector2s, DateTime> zone in visited)
 			{
 				lines.Add($"visited {zone.Key.x} {zone.Key.y} {Format(zone.Value)}");
@@ -210,9 +201,6 @@ namespace ResourceRegrowth
 		}
 
 		public IEnumerable<KeyValuePair<Vector2s, DateTime>> Visited => visited;
-		public void MarkPlanted(Vector2s zone) => planted.Add(zone);
-		public bool IsPlanted(Vector2s zone) => planted.Contains(zone);
-		public int PlantedCount => planted.Count;
 
 		public bool TryLastSeen(Vector2s zone, out DateTime time) => lastSeen.TryGetValue(zone, out time);
 		public int VisitedCount => visited.Count;
