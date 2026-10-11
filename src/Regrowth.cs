@@ -285,6 +285,8 @@ namespace ResourceRegrowth
 				List<Candidate> candidates = new List<Candidate>();
 				List<ZDO> sources = new List<ZDO>();
 				Dictionary<Vector2s, List<ZDO>> standing = new Dictionary<Vector2s, List<ZDO>>();
+				// Fractured remains of wanted objects (a hit pile or rock leaves "<name>_frac"), by zone.
+				Dictionary<Vector2s, List<ZDO>> remains = new Dictionary<Vector2s, List<ZDO>>();
 				// Building pieces the world generated (no creator), which is what holds a location object up.
 				Dictionary<Vector2s, List<ZDO>> worldPieces = new Dictionary<Vector2s, List<ZDO>>();
 				// Dungeon generators (dungeon interiors, camps, villages): what an object inside a dungeon belongs to.
@@ -350,6 +352,15 @@ namespace ResourceRegrowth
 						if (!standing.TryGetValue(zone, out List<ZDO> list))
 						{
 							standing[zone] = list = new List<ZDO>();
+						}
+						list.Add(zdo);
+					}
+					else if (locationObjects != null && settings.LocationObjectsClearRemains.Value && locationObjects.IsRemains(prefab))
+					{
+						Vector2s zone = ZoneSystem.GetZone(zdo.GetPosition());
+						if (!remains.TryGetValue(zone, out List<ZDO> list))
+						{
+							remains[zone] = list = new List<ZDO>();
 						}
 						list.Add(zdo);
 					}
@@ -445,11 +456,12 @@ namespace ResourceRegrowth
 				}
 				if (locationObjects != null)
 				{
+					remainsGone.Clear();
 					foreach (LocationObjects.Slot slot in locationObjects.AllSlots())
 					{
 						try
 						{
-							DecideSlot(slot, now, dryRun, blockers, standing, worldPieces, tallies[Kind.LocationObject], stillDepleted, regrown);
+							DecideSlot(slot, now, dryRun, blockers, standing, remains, worldPieces, tallies[Kind.LocationObject], stillDepleted, regrown);
 						}
 						catch (Exception e)
 						{
@@ -927,7 +939,8 @@ namespace ResourceRegrowth
 		private const float SlotTolerance = 1.5f;
 
 		private void DecideSlot(LocationObjects.Slot slot, DateTime now, bool dryRun, Dictionary<Vector2s, List<Vector3>> blockers,
-			Dictionary<Vector2s, List<ZDO>> standing, Dictionary<Vector2s, List<ZDO>> worldPieces, Tally tally, HashSet<string> stillDepleted, HashSet<string> regrown)
+			Dictionary<Vector2s, List<ZDO>> standing, Dictionary<Vector2s, List<ZDO>> remains, Dictionary<Vector2s, List<ZDO>> worldPieces,
+			Tally tally, HashSet<string> stillDepleted, HashSet<string> regrown)
 		{
 			Vector2s zone = ZoneSystem.GetZone(slot.position);
 			for (int dy = -1; dy <= 1; dy++)
@@ -976,19 +989,60 @@ namespace ResourceRegrowth
 				tally.inUse++;
 				return;
 			}
+			// What the hit left of it (the pieces still to mine) goes with it, or the pile would stand twice.
+			List<ZDO> leftovers = settings.LocationObjectsClearRemains.Value ? RemainsNear(remains, slot.position) : new List<ZDO>();
 			tally.regrown++;
 			if (tally.logged < settings.LogDetailsPerPass.Value)
 			{
 				tally.logged++;
 				RegrowthPlugin.Log.LogInfo(
 					$"{(dryRun ? "Would put back" : "Put back")} {Name(slot.prefab)} of {slot.source} at {slot.position.x:0},{slot.position.y:0},{slot.position.z:0}: "
-					+ $"missing {depleted:0.##} h, area idle {idle:0.##} h.");
+					+ $"missing {depleted:0.##} h, area idle {idle:0.##} h" + (leftovers.Count > 0 ? $"; {leftovers.Count} fractured remain(s) {(dryRun ? "would go" : "go")} with it." : "."));
 			}
 			if (!dryRun)
 			{
+				foreach (ZDO remainder in leftovers)
+				{
+					remainder.SetOwner(ZDOMan.GetSessionID());
+					ZDOMan.instance.DestroyZDO(remainder);
+					remainsGone.Add(remainder.m_uid);
+				}
 				LocationObjects.Create(slot.prefab, slot.position, slot.rotation);
 				regrown.Add(key);
 			}
+		}
+
+		private const float RemainsRadius = 1.5f;
+		// Remains destroyed in this pass (a destroyed object is only gone once the destroy list is sent).
+		private readonly HashSet<ZDOID> remainsGone = new HashSet<ZDOID>();
+
+		// The fractured remains standing at a slot, in zones the server has not loaded.
+		private List<ZDO> RemainsNear(Dictionary<Vector2s, List<ZDO>> remains, Vector3 position)
+		{
+			List<ZDO> found = new List<ZDO>();
+			Vector2s zone = ZoneSystem.GetZone(position);
+			for (int dy = -1; dy <= 1; dy++)
+			{
+				for (int dx = -1; dx <= 1; dx++)
+				{
+					if (!remains.TryGetValue(new Vector2s(zone.x + dx, zone.y + dy), out List<ZDO> list))
+					{
+						continue;
+					}
+					foreach (ZDO zdo in list)
+					{
+						Vector3 p = zdo.GetPosition();
+						float x = p.x - position.x;
+						float z = p.z - position.z;
+						if (x * x + z * z <= RemainsRadius * RemainsRadius && Mathf.Abs(p.y - position.y) < 2f
+							&& !remainsGone.Contains(zdo.m_uid) && !ZoneSystem.instance.m_zones.ContainsKey(ZoneSystem.GetZone(p)))
+						{
+							found.Add(zdo);
+						}
+					}
+				}
+			}
+			return found;
 		}
 
 		private float AfterHours(Kind kind)
@@ -1116,6 +1170,7 @@ namespace ResourceRegrowth
 		{
 			float radius = Mathf.Max(0f, settings.PlayerBuildRadius.Value);
 			int zones = Mathf.CeilToInt(radius / 64f);
+			bool inside = position.y > InteriorHeight;
 			Vector2s zone = ZoneSystem.GetZone(position);
 			for (int dy = -zones; dy <= zones; dy++)
 			{
@@ -1127,6 +1182,12 @@ namespace ResourceRegrowth
 					}
 					foreach (Vector3 blocker in list)
 					{
+						// A dungeon's interior lies 5000 m up: a base on the surface above it is not touched by what
+						// comes back inside, and a tombstone down there is not touched by what comes back on the surface.
+						if ((blocker.y > InteriorHeight) != inside)
+						{
+							continue;
+						}
 						float x = blocker.x - position.x;
 						float z = blocker.z - position.z;
 						if (x * x + z * z <= radius * radius)
@@ -1138,5 +1199,7 @@ namespace ResourceRegrowth
 			}
 			return false;
 		}
+
+		private const float InteriorHeight = 2500f;
 	}
 }

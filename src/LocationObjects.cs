@@ -55,6 +55,8 @@ namespace ResourceRegrowth
 		private const float SupportRadius = 3f;
 
 		private readonly HashSet<int> wanted;
+		// What the game leaves when a wanted object is hit: its prefab's name and "_frac".
+		private readonly HashSet<int> remains;
 		private readonly int proxyPrefab;
 		private readonly Dictionary<int, DungeonGenerator> generatorPrefabs = new Dictionary<int, DungeonGenerator>();
 		private readonly Dictionary<int, ZoneSystem.ZoneLocation> locations = new Dictionary<int, ZoneSystem.ZoneLocation>();
@@ -68,7 +70,9 @@ namespace ResourceRegrowth
 
 		public LocationObjects(IEnumerable<string> prefabNames)
 		{
-			wanted = new HashSet<int>(prefabNames.Select(n => n.GetStableHashCode()));
+			List<string> names = prefabNames.ToList();
+			wanted = new HashSet<int>(names.Select(n => n.GetStableHashCode()));
+			remains = new HashSet<int>(names.Select(n => (n + "_frac").GetStableHashCode()));
 			proxyPrefab = ZoneSystem.instance.m_locationProxyPrefab.name.GetStableHashCode();
 			foreach (GameObject prefab in ZNetScene.instance.m_prefabs)
 			{
@@ -95,6 +99,12 @@ namespace ResourceRegrowth
 		public bool IsWanted(int prefab)
 		{
 			return wanted.Contains(prefab);
+		}
+
+		// The fractured remains of a wanted object (see Settings.LocationObjectsClearRemains).
+		public bool IsRemains(int prefab)
+		{
+			return remains.Contains(prefab);
 		}
 
 		// Whether anything still stands where one of the slot's supports stood.

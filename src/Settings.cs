@@ -37,6 +37,7 @@ namespace ResourceRegrowth
 		public readonly ConfigEntry<bool> LocationObjectsEnabled;
 		public readonly ConfigEntry<float> LocationObjectsAfterHours;
 		public readonly ConfigEntry<string> LocationObjectsPrefabs;
+		public readonly ConfigEntry<bool> LocationObjectsClearRemains;
 
 		public readonly ConfigEntry<bool> ZonesEnabled;
 		public readonly ConfigEntry<bool> ZonesDryRun;
@@ -102,7 +103,9 @@ namespace ResourceRegrowth
 			LocationObjectsAfterHours = config.Bind("LocationObjects", "AfterHours", 48f,
 				"Real hours after the plugin first saw the object missing.");
 			LocationObjectsPrefabs = config.Bind("LocationObjects", "Prefabs", "Beehive",
-				"Prefabs to put back. Only objects the world itself generated in a location or village room are ever recreated, never player-built ones. Comma separated. Needs a restart.");
+				"Prefabs to put back. Only objects the world itself generated in a location or village room are ever recreated, never player-built ones. Comma separated. Needs a restart. A muddy scrap pile in a sunken crypt is `mudpile2`.");
+			LocationObjectsClearRemains = config.Bind("LocationObjects", "ClearRemains", true,
+				"When an object is put back, what is left of it goes: the fractured remains the game spawns when a pile or rock is hit (the prefab's name and \"_frac\") within 1.5 m of its place. Without this the pile would stand twice, once whole and once as the pieces still to mine.");
 
 			ZonesEnabled = config.Bind("Zones", "Enabled", false,
 				"Generate a zone players have been in again, as the world first made it, once nobody has been near it for IdleHours: trees, rocks, ore deposits, bushes, pickables, the location with its buildings, chests, creatures and dungeon, and the ground -- as if no player had ever been there. Never a zone with a workbench in it or within PlayerBuildRadius (a base), never a protected location. Players' things elsewhere stay where they are (pieces, tombstones, ships, carts, items they carried, tamed creatures, chests and stands holding something of theirs); fields, roads and trees they planted go with the reset unless a workbench is near. Unlike the rest this deletes and creates objects, so it is off until switched on. Needs a restart.");

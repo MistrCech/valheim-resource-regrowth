@@ -11,7 +11,9 @@ It brings one-time world content back once an area has been left alone for a whi
 - **Terrain** that players dug, raised, levelled or paved slowly returns to the land's own shape,
   except around player bases and wards.
 - **Location objects** (off by default): destroyed objects a location or village generated -- wild
-  **beehives** in abandoned houses, for example -- are put back exactly where they stood.
+  **beehives** in abandoned houses, for example -- are put back exactly where they stood. A muddy scrap
+  pile in a sunken crypt (`mudpile2`, add it to `Prefabs`) is one too: the iron comes back with the
+  crypt's chests and creatures, and what is left of the pile that was hit goes with it.
 - **Zones** (off by default): a zone players have been in is **generated again by the game itself**
   once nobody has been near it for three days -- trees, rocks and ore deposits, bushes, pickables, the
   location with its buildings, chests, creatures and dungeon, and the ground -- as if no player had
@@ -45,6 +47,14 @@ Checked on a live world: of 169 beehive places the replay said 47 had a hive, an
 standing were on exactly those places (same height to the centimetre), none anywhere else.
 A hive hangs under the roof of its house; when the pieces of the house that held it are gone
 (pulled down by players), the hive is not put back, so nothing floats in the air.
+
+A pile or rock that is hit does not vanish at once: the game replaces it with its fractured remains
+(`<name>_frac`), which are what is mined. So when an object is put back, the remains of it within 1.5 m
+go (`ClearRemains`), or it would stand twice. Checked on a live world copy: a sunken crypt had 301 pile
+places, the replay said 174 had a pile, 162 stood whole, 12 were gone -- and there were exactly 12
+fractured remains; 11 were put back at their own places (the twelfth had lost a gate that held it) and
+11 remains went, none of the new piles on another. A base on the surface does not hold back what comes
+back inside a dungeon (5000 m up), nor does a tombstone down there hold back the surface above it.
 
 Whether a player took everything from a chest, some of it or nothing cannot be told from the chest,
 so a chest counts as used once a player has been near it; when its time comes it is emptied and

@@ -1,3 +1,19 @@
+## [0.8.0] - 2026-10-11
+
+### Added
+
+- `[LocationObjects] ClearRemains` (on): when a wanted object is put back, its fractured remains
+  (`<name>_frac`, what the game leaves when a pile or rock is hit) within 1.5 m go with it. With
+  `Prefabs = Beehive,mudpile2` the iron scrap piles of sunken crypts come back where they stood, with the
+  crypt's chests and creatures; without the cleanup the pile would stand twice (whole and as pieces to mine).
+
+### Changed
+
+- A player's building or tombstone holds back (`PlayerBuildRadius`) only what is on the same level: a base on
+  the surface no longer holds back chests, creatures, cores and objects inside the dungeon below it
+  (interiors lie 5000 m up), nor a tombstone inside a dungeon what comes back on the surface above it.
+  Zones with a workbench are still never generated again.
+
 # Changelog
 
 ## [0.7.2] - 2026-10-10
