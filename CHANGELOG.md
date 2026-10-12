@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3] - 2026-10-12
+
+### Changed
+
+- Thunderstore package only (`Sarkastic_gg/Resource_Regrowth`): the README has badges and links (Discord, Patreon)
+  and the package is listed in the "Deep North Update" section. The plugin is the 0.8.0 DLL, unchanged.
+
 ## [0.8.2] - 2026-10-12
 
 ### Changed
