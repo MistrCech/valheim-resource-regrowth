@@ -1,14 +1,14 @@
 # Thunderstore package of this plugin, built and published with `tcli` (github.com/thunderstore-io/thunderstore-cli):
 #   tcli build                          builds dist/Sarkastic_gg-Resource_Regrowth-<version>.zip
 #   tcli publish --token <token>        uploads it (the token is a service account token of the team)
-# The version is the one in RegrowthPlugin.cs; change both together.
+# The version is the plugin's (RegrowthPlugin.cs); a package-only change (the icon) takes the next patch number.
 [config]
 schemaVersion = "0.0.1"
 
 [package]
 namespace = "Sarkastic_gg"
 name = "Resource_Regrowth"
-versionNumber = "0.8.0"
+versionNumber = "0.8.1"
 description = "Server-side BepInEx plugin for Valheim 1.0 servers: brings back surtling cores, chest loot, one-time monsters, beehives, crypt iron, cave items, terrain and whole zones in areas left alone. Vanilla clients."
 websiteUrl = "https://github.com/MistrCech/valheim-resource-regrowth"
 containsNsfwContent = false

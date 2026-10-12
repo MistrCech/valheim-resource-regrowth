@@ -1,3 +1,12 @@
+# Changelog
+
+## [0.8.1] - 2026-10-12
+
+### Changed
+
+- Thunderstore package only (`Sarkastic_gg/Resource_Regrowth`): a new pixel art icon. The plugin is the
+  0.8.0 DLL, unchanged; a package's icon can only change with a new version number.
+
 ## [0.8.0] - 2026-10-11
 
 ### Added
@@ -13,8 +22,6 @@
   the surface no longer holds back chests, creatures, cores and objects inside the dungeon below it
   (interiors lie 5000 m up), nor a tombstone inside a dungeon what comes back on the surface above it.
   Zones with a workbench are still never generated again.
-
-# Changelog
 
 ## [0.7.2] - 2026-10-10
 
