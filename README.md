@@ -22,6 +22,8 @@ It brings one-time world content back once an area has been left alone for a whi
 Players need nothing: vanilla clients work. The plugin depends on BepInEx and nothing else. It
 patches one game method, and only with Zones switched on (see Zones).
 
+**Recommended with [Dedicated Simulation](https://thunderstore.io/c/valheim/p/Sarkastic_gg/Dedicated_Simulation/)** (`Sarkastic_gg/Dedicated_Simulation`, [GitHub](https://github.com/MistrCech/valheim-serverside)), a fork of Serverside Simulations by ddormer that keeps the world simulated on the server. This plugin works on its own, but the two are made to run together: the zone reset generates a zone the way Dedicated Simulation does.
+
 ## How it works
 
 Everything handled here stays in the world when it is used up, so regrowing it only changes

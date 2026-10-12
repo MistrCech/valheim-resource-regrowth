@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2] - 2026-10-12
+
+### Changed
+
+- Thunderstore package only: the README and the description say that the plugin is recommended with
+  `Sarkastic_gg/Dedicated_Simulation`. The plugin is the 0.8.0 DLL, unchanged.
+
 ## [0.8.1] - 2026-10-12
 
 ### Changed
