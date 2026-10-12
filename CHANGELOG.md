@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4] - 2026-10-12
+
+### Changed
+
+- Thunderstore package only: the plugin is licensed under the MIT licence (`LICENSE`, in the repository and in the
+  package); the README says so. The plugin is the 0.8.0 DLL, unchanged.
+
 ## [0.8.3] - 2026-10-12
 
 ### Changed
