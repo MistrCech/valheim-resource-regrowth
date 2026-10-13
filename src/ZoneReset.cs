@@ -70,6 +70,14 @@ namespace ResourceRegrowth
 		internal static ZoneReset Active;
 
 		private const int ReadyFrames = 600;
+		private const double RefreshIdleHours = 0.5;
+		private const int RefreshMost = 5000;
+
+		// Set when a RefreshNow pass went through all the due zones; Regrowth.Pass switches the setting off then.
+		internal bool RefreshDone;
+
+		// The idle time this pass needs (IdleHours, or RefreshIdleHours in a RefreshNow pass); Reset re-checks against it.
+		private double idleNeeded;
 		private static readonly TimeSpan Backoff = TimeSpan.FromHours(1);
 
 		private readonly Settings settings;
@@ -332,7 +340,14 @@ namespace ResourceRegrowth
 				RegrowthPlugin.Log.LogInfo($"Zones: first run -- what players did before cannot be told, so all {state.VisitedCount} zones generated so far count as visited; none is generated again before {settings.ZonesIdleHours.Value:0.#} h from now.");
 			}
 			bool dryRun = settings.ZonesDryRun.Value || settings.DryRun.Value;
+			// RefreshNow: one pass that takes every zone nobody has been near for RefreshIdleHours, at once, then switches itself off (Regrowth.Pass).
+			bool refresh = settings.ZonesRefreshNow.Value && !dryRun;
 			double needed = Math.Max(0f, settings.ZonesIdleHours.Value);
+			if (refresh)
+			{
+				needed = Math.Min(needed, RefreshIdleHours);
+			}
+			idleNeeded = needed;
 			List<KeyValuePair<Vector2s, double>> due = new List<KeyValuePair<Vector2s, double>>();
 			foreach (KeyValuePair<Vector2s, DateTime> visit in state.Visited.ToList())
 			{
@@ -357,7 +372,7 @@ namespace ResourceRegrowth
 				due.Add(new KeyValuePair<Vector2s, double>(zone, idle));
 			}
 			tally.due = due.Count;
-			if ((now - started).TotalMinutes < settings.ZonesGraceMinutes.Value)
+			if (!refresh && (now - started).TotalMinutes < settings.ZonesGraceMinutes.Value)
 			{
 				if (!announcedGrace && due.Count > 0)
 				{
@@ -366,7 +381,11 @@ namespace ResourceRegrowth
 				}
 				yield break;
 			}
-			int perPass = Math.Max(0, settings.ZonesPerPass.Value);
+			int perPass = refresh ? RefreshMost : Math.Max(0, settings.ZonesPerPass.Value);
+			if (refresh)
+			{
+				RegrowthPlugin.Log.LogInfo($"Zones: RefreshNow -- {due.Count} zone(s) nobody has been near for {RefreshIdleHours * 60:0} minutes are generated again now.");
+			}
 			int attempts = 0;
 			foreach (KeyValuePair<Vector2s, double> zone in due.OrderByDescending(z => z.Value))
 			{
@@ -397,6 +416,10 @@ namespace ResourceRegrowth
 				{
 					yield break;
 				}
+			}
+			if (refresh)
+			{
+				RefreshDone = true;
 			}
 		}
 
@@ -509,7 +532,7 @@ namespace ResourceRegrowth
 				yield break;
 			}
 			// From here on, one frame: nothing can change in between.
-			if (!zs.IsZoneGenerated(zone) || (DateTime.UtcNow - IdleSince(zone)).TotalHours < settings.ZonesIdleHours.Value)
+			if (!zs.IsZoneGenerated(zone) || (DateTime.UtcNow - IdleSince(zone)).TotalHours < idleNeeded)
 			{
 				Later(zone, tally, "a player came near");
 				yield break;

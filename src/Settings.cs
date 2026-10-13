@@ -45,6 +45,7 @@ namespace ResourceRegrowth
 		public readonly ConfigEntry<int> ZonesPerPass;
 		public readonly ConfigEntry<float> ZonesGraceMinutes;
 		public readonly ConfigEntry<string> ZonesProtected;
+		public readonly ConfigEntry<bool> ZonesRefreshNow;
 
 		public readonly ConfigEntry<bool> TerrainEnabled;
 		public readonly ConfigEntry<float> TerrainAfterHours;
@@ -120,6 +121,11 @@ namespace ResourceRegrowth
 			ZonesProtected = config.Bind("Zones", "ProtectedLocations",
 				"StartTemple,Eikthyrnir,GDKing,Bonemass,Dragonqueen,GoblinKing,Mistlands_DvergrBossEntrance1,FaderLocation,Vendor_BlackForest,Hildir_camp,BogWitch_Camp,Hildir_crypt,Hildir_cave,Hildir_plainsfortress",
 				"Locations whose zone is never generated again, besides every location the game places only once. Comma separated. Needs a restart.");
+
+			ZonesRefreshNow = config.Bind("Zones", "RefreshNow", false,
+				"One-off, switches itself off in the config when done: in the first pass after a start generate again every visited zone nobody has been near for the last 30 minutes (not only those idle for IdleHours), "
+				+ "without the PerPass limit and without GraceMinutes, and bring the ground of every modified zone back to the land's own shape at once, paint too, whatever KeepPaved and KeepCultivated say. "
+				+ "What a workbench or a ward protects, protected locations and the 4 m around players' pieces stay as they are. Needs Zones.Enabled and no DryRun.");
 
 			TerrainEnabled = config.Bind("Terrain", "Enabled", true,
 				"Let dug, raised, levelled and paved ground slowly return to the land's own shape once the area has been left alone. Ground around a player base (anything the game counts as a base: workbench, forge, stonecutter ... and wards) is left as it is; when the base is gone, so is the protection.");

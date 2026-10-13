@@ -161,7 +161,7 @@ namespace ResourceRegrowth
 			vertex (x, y) of a 64 m zone lies at centre + (x - 32, y - 32), as Heightmap.CalcVertex
 			has it. Returns the new data, or null when nothing changed.
 		*/
-		public static Data Step(Data d, Vector3 center, List<Protector> protectors, Settings s, Stats stats)
+		public static Data Step(Data d, Vector3 center, List<Protector> protectors, Settings s, Stats stats, bool all = false)
 		{
 			int width = Mathf.RoundToInt(Mathf.Sqrt(d.modifiedHeight.Length)) - 1;
 			if ((width + 1) * (width + 1) != d.modifiedHeight.Length || width <= 0)
@@ -198,8 +198,8 @@ namespace ResourceRegrowth
 				}
 				if (d.modifiedHeight[i])
 				{
-					float level = d.levelDelta[i] / divider;
-					float smooth = d.smoothDelta[i] / divider;
+					float level = all ? 0f : d.levelDelta[i] / divider;
+					float smooth = all ? 0f : d.smoothDelta[i] / divider;
 					if (Mathf.Abs(level) < minDelta) level = 0f;
 					if (Mathf.Abs(smooth) < minDelta) smooth = 0f;
 					if (level != d.levelDelta[i] || smooth != d.smoothDelta[i])
@@ -217,7 +217,7 @@ namespace ResourceRegrowth
 				if (samePaintGrid && d.modifiedPaint[i])
 				{
 					Color c = d.paintMask[i];
-					bool keep = (s.TerrainKeepPaved.Value && c.b > 0.5f) || (s.TerrainKeepCultivated.Value && c.g > 0.5f);
+					bool keep = !all && ((s.TerrainKeepPaved.Value && c.b > 0.5f) || (s.TerrainKeepCultivated.Value && c.g > 0.5f));
 					// Paint goes last: only once the ground under it is back to its own height.
 					if (!keep && !d.modifiedHeight[i])
 					{

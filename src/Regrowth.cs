@@ -531,6 +531,12 @@ namespace ResourceRegrowth
 					+ (errors > 0 ? $" {errors} object(s) skipped after errors." : "")
 					+ (regrown.Count > 0 || terrainStepped || zonesChanged ? " World save requested." : ""));
 				terrainStepped = false;
+				if (zones != null && zones.RefreshDone)
+				{
+					zones.RefreshDone = false;
+					settings.ZonesRefreshNow.Value = false;
+					RegrowthPlugin.Log.LogInfo("Zones: RefreshNow is done and switched off in the config; the zones and the ground it left follow the usual clocks again.");
+				}
 				SaveState();
 			}
 			finally
@@ -826,12 +832,14 @@ namespace ResourceRegrowth
 			Vector3 position = zdo.GetPosition();
 			double modified = Hours(state.DepletedSince(key, now), now);
 			double idle = Hours(state.LastSeen(ZoneSystem.GetZone(position)), now);
-			if (modified < settings.TerrainAfterHours.Value || idle < settings.IdleHours.Value)
+			// RefreshNow: every modified zone nobody has been near for half an hour is stepped back at once, without the clocks.
+			bool refresh = settings.ZonesRefreshNow.Value && settings.ZonesEnabled.Value && !settings.ZonesDryRun.Value && !dryRun;
+			if (refresh ? idle < 0.5 : (modified < settings.TerrainAfterHours.Value || idle < settings.IdleHours.Value))
 			{
 				tally.waiting++;
 				return;
 			}
-			if (state.HasKey(stepKey))
+			if (!refresh && state.HasKey(stepKey))
 			{
 				stillDepleted.Add(stepKey);
 				if (Hours(state.DepletedSince(stepKey, now), now) < settings.TerrainStepHours.Value)
@@ -856,7 +864,7 @@ namespace ResourceRegrowth
 			}
 			Terrain.Data data = Terrain.Decode(zdo.GetByteArray(ZDOVars.s_TCData));
 			Terrain.Stats stats = new Terrain.Stats();
-			Terrain.Data result = Terrain.Step(data, position, near, settings, stats);
+			Terrain.Data result = Terrain.Step(data, position, near, settings, stats, all: refresh);
 			if (result == null)
 			{
 				// Everything left is protected (or already zero).

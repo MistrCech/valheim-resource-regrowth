@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.5] - 2026-10-13
+
+### Added
+
+- `[Zones] RefreshNow` (off): a one-off, for when the owner wants everything that nothing protects back at once. In the
+  first pass after a start every visited zone nobody has been near for the last 30 minutes is generated again --
+  without `IdleHours`, `GraceMinutes` and the `PerPass` limit -- and the ground of every modified zone is brought
+  back at once, paint too, whatever `KeepPaved` and `KeepCultivated` say. What a workbench or a ward protects,
+  protected locations and the 4 m around players' pieces stay as they are. The setting switches itself off in the
+  config when the pass is done, so the usual clocks apply again; it needs `[Zones] Enabled` and no `DryRun`.
+
 ## [0.8.4] - 2026-10-12
 
 ### Changed

@@ -1,6 +1,6 @@
 # Sarkastic.gg Resource Regrowth
 
-![version: 0.8.4](https://img.shields.io/badge/version-0.8.4-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
+![version: 0.8.5](https://img.shields.io/badge/version-0.8.5-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
 
 [Source code](https://github.com/MistrCech/valheim-resource-regrowth)  ·  [Report a bug](https://github.com/MistrCech/valheim-resource-regrowth/issues/new)  ·  [Changelog](https://github.com/MistrCech/valheim-resource-regrowth/blob/main/CHANGELOG.md)  ·  [Dedicated Simulation](https://thunderstore.io/c/valheim/p/Sarkastic_gg/Dedicated_Simulation/)
 
@@ -225,6 +225,7 @@ applied at startup.
 | Zones | IdleHours | 72 | real hours with nobody near before a zone is generated again |
 | Zones | PerPass | 8 | most zones per pass |
 | Zones | GraceMinutes | 30 | minutes after a start before any zone is generated again |
+| Zones | RefreshNow | false | one-off, switches itself off in the config: in the first pass after a start, generate again every zone nobody has been near for the last 30 minutes (no IdleHours, no GraceMinutes, no PerPass) and bring the ground of every modified zone back at once, paint too; what a workbench or a ward protects stays |
 | Zones | ProtectedLocations | StartTemple, boss altars, traders, Hildir's dungeons | never generated again (also every location placed only once) |
 
 ## Build
