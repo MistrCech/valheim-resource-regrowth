@@ -107,6 +107,18 @@ namespace ResourceRegrowth
 			return remains.Contains(prefab);
 		}
 
+		/*
+			What can hold an object up: anything breakable the location itself built (WearNTear) -- the walls
+			of a house a hive hangs in, but a dungeon's bench or training dummy beside a fire pit too, which
+			are not buildable pieces. The same test picks the supports from a location's layout and finds
+			them standing in the world; with two tests a support of a kind only one of them knew was never
+			found, and the object waited for it forever.
+		*/
+		public static bool Holds(GameObject gameObject)
+		{
+			return gameObject.GetComponent<WearNTear>();
+		}
+
 		// Whether anything still stands where one of the slot's supports stood.
 		public static bool Supported(Slot slot, Dictionary<Vector2s, List<ZDO>> pieces)
 		{
@@ -291,7 +303,9 @@ namespace ResourceRegrowth
 						local = at,
 						rotation = view.gameObject.transform.rotation,
 						random = view.GetComponentInParent<RandomSpawn>(true) != null || view.GetComponentInParent<RandomObject>(true) != null,
-						supports = views.Where(other => other != view && other.GetComponent<WearNTear>()
+						// Not another object put back here: two fire pits side by side, both broken, would each wait for the other forever.
+						supports = views.Where(other => other != view && Holds(other.gameObject)
+							&& !wanted.Contains(Utils.GetPrefabName(other.gameObject).GetStableHashCode())
 							&& new Vector2(other.transform.position.x - at.x, other.transform.position.z - at.z).magnitude <= SupportRadius
 							&& other.transform.position.y <= at.y + 0.5f).ToList(),
 					});

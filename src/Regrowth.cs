@@ -14,7 +14,8 @@ namespace ResourceRegrowth
 		destroyed objects a location or village generated, which are created again where they stood.
 		That is off unless switched on.
 
-		- Surtling core stands (hide-when-picked pickables): ZDO "picked" back to false.
+		- Surtling core stands and the other hide-when-picked pickables listed (the totem on a Fuling
+		  totem pole): ZDO "picked" back to false.
 		- Treasure chests: restocked from the chest's own loot table, the way
 		  Container.AddDefaultItems fills it -- whatever was left in it is replaced. Vanilla would only
 		  fill a chest on load when the loading machine already owns it, and ownership is handed out
@@ -39,7 +40,7 @@ namespace ResourceRegrowth
 
 		private class Tally
 		{
-			public int depleted, waiting, blocked, unsupported, inUse, regrown, logged;
+			public int depleted, waiting, blocked, unsupported, inUse, regrown, logged, extra;
 		}
 
 		// ZDO instances are pooled and reused after an object is destroyed, so a candidate keeps
@@ -59,10 +60,12 @@ namespace ResourceRegrowth
 		private readonly Settings settings;
 		private RegrowthState state;
 		private readonly Dictionary<int, bool> corePrefabs = new Dictionary<int, bool>(); // prefab -> picked by default
+		private readonly Dictionary<int, float> coreHours = new Dictionary<int, float>(); // prefab -> its own AfterHours ("name:hours")
 		private readonly Dictionary<int, Container> chestPrefabs = new Dictionary<int, Container>();
 		private readonly HashSet<int> spawnerPrefabs = new HashSet<int>();
 		private readonly HashSet<int> generatorPrefabs = new HashSet<int>();
 		private readonly HashSet<int> piecePrefabs = new HashSet<int>();
+		private readonly HashSet<int> holderPrefabs = new HashSet<int>(); // what can hold a location object up (LocationObjects.Holds)
 		private readonly HashSet<int> tombstonePrefabs = new HashSet<int>();
 		private readonly int terrainPrefab = Terrain.CompilerPrefab.GetStableHashCode();
 		private Dictionary<int, float> protectorPrefabs = new Dictionary<int, float>();
@@ -110,7 +113,7 @@ namespace ResourceRegrowth
 			passTimer = 60f;
 			RegrowthPlugin.Log.LogInfo(
 				$"Active{(settings.DryRun.Value ? " (dry run: nothing will be changed)" : "")}. "
-				+ $"Surtling core stands: {corePrefabs.Count} prefab(s), treasure chests: {chestPrefabs.Count}, one-time spawners: {spawnerPrefabs.Count}, "
+				+ $"Pickables: {string.Join(", ", corePrefabs.Keys.Select(h => Name(h) + (coreHours.TryGetValue(h, out float own) ? $" ({own:0.#} h)" : "")))}, treasure chests: {chestPrefabs.Count}, one-time spawners: {spawnerPrefabs.Count}, "
 				+ $"location objects: {(locationObjects != null ? settings.LocationObjectsPrefabs.Value : "off")}. "
 				+ $"Tracking since {state.FirstRun.ToLocalTime():yyyy-MM-dd HH:mm} ({Hours(state.FirstRun, now):0.#} h ago). State: {state.FilePath}");
 		}
@@ -178,7 +181,20 @@ namespace ResourceRegrowth
 
 		private void BuildPrefabSets()
 		{
-			HashSet<string> cores = SplitList(settings.CorePrefabs.Value);
+			// "name" or "name:hours" -- a prefab with its own hours instead of AfterHours.
+			Dictionary<string, float> cores = new Dictionary<string, float>();
+			foreach (string entry in SplitList(settings.CorePrefabs.Value))
+			{
+				int colon = entry.IndexOf(':');
+				string name = colon < 0 ? entry : entry.Substring(0, colon).Trim();
+				float hours = float.NaN;
+				if (colon >= 0 && (!float.TryParse(entry.Substring(colon + 1).Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out hours) || hours < 0f))
+				{
+					RegrowthPlugin.Log.LogWarning($"[SurtlingCores] Prefabs: \"{entry}\" has no hours after the colon; {name} takes AfterHours.");
+					hours = float.NaN;
+				}
+				cores[name] = hours;
+			}
 			HashSet<string> excludedChests = SplitList(settings.ChestsExclude.Value);
 			HashSet<string> excludedSpawners = SplitList(settings.SpawnersExclude.Value);
 			foreach (GameObject prefab in ZNetScene.instance.m_prefabs)
@@ -193,16 +209,24 @@ namespace ResourceRegrowth
 				{
 					piecePrefabs.Add(hash);
 				}
+				if (LocationObjects.Holds(prefab))
+				{
+					holderPrefabs.Add(hash);
+				}
 				if (prefab.GetComponent<TombStone>())
 				{
 					tombstonePrefabs.Add(hash);
 				}
-				if (cores.Contains(prefab.name))
+				if (cores.TryGetValue(prefab.name, out float ownHours))
 				{
 					Pickable pickable = prefab.GetComponent<Pickable>();
 					if (pickable && pickable.m_hideWhenPicked && pickable.m_respawnTimeMinutes <= 0f)
 					{
 						corePrefabs[hash] = pickable.m_defaultPicked;
+						if (!float.IsNaN(ownHours))
+						{
+							coreHours[hash] = ownHours;
+						}
 					}
 					else
 					{
@@ -287,7 +311,7 @@ namespace ResourceRegrowth
 				Dictionary<Vector2s, List<ZDO>> standing = new Dictionary<Vector2s, List<ZDO>>();
 				// Fractured remains of wanted objects (a hit pile or rock leaves "<name>_frac"), by zone.
 				Dictionary<Vector2s, List<ZDO>> remains = new Dictionary<Vector2s, List<ZDO>>();
-				// Building pieces the world generated (no creator), which is what holds a location object up.
+				// What the world generated that can hold a location object up (LocationObjects.Holds, no creator), by zone.
 				Dictionary<Vector2s, List<ZDO>> worldPieces = new Dictionary<Vector2s, List<ZDO>>();
 				// Dungeon generators (dungeon interiors, camps, villages): what an object inside a dungeon belongs to.
 				Dictionary<Vector2s, List<ZDO>> generators = new Dictionary<Vector2s, List<ZDO>>();
@@ -304,7 +328,7 @@ namespace ResourceRegrowth
 					{
 						AddBlocker(blockers, zdo.GetPosition());
 					}
-					else if (locationObjects != null && piecePrefabs.Contains(prefab))
+					else if (locationObjects != null && holderPrefabs.Contains(prefab))
 					{
 						Vector2s pieceZone = ZoneSystem.GetZone(zdo.GetPosition());
 						if (!worldPieces.TryGetValue(pieceZone, out List<ZDO> pieceList))
@@ -346,21 +370,23 @@ namespace ResourceRegrowth
 					{
 						sources.Add(zdo);
 					}
-					else if (locationObjects != null && locationObjects.IsWanted(prefab))
-					{
-						Vector2s zone = ZoneSystem.GetZone(zdo.GetPosition());
-						if (!standing.TryGetValue(zone, out List<ZDO> list))
-						{
-							standing[zone] = list = new List<ZDO>();
-						}
-						list.Add(zdo);
-					}
 					else if (locationObjects != null && settings.LocationObjectsClearRemains.Value && locationObjects.IsRemains(prefab))
 					{
 						Vector2s zone = ZoneSystem.GetZone(zdo.GetPosition());
 						if (!remains.TryGetValue(zone, out List<ZDO> list))
 						{
 							remains[zone] = list = new List<ZDO>();
+						}
+						list.Add(zdo);
+					}
+					// Not in the chain above: a pickable can be in [SurtlingCores] Prefabs too (hanging_hairstrands). Up to 0.8.5 such a
+					// one never counted as standing, so every place of it looked empty and got one more each time its hours were up.
+					if (locationObjects != null && locationObjects.IsWanted(prefab))
+					{
+						Vector2s zone = ZoneSystem.GetZone(zdo.GetPosition());
+						if (!standing.TryGetValue(zone, out List<ZDO> list))
+						{
+							standing[zone] = list = new List<ZDO>();
 						}
 						list.Add(zdo);
 					}
@@ -457,6 +483,7 @@ namespace ResourceRegrowth
 				if (locationObjects != null)
 				{
 					remainsGone.Clear();
+					extraGone.Clear();
 					foreach (LocationObjects.Slot slot in locationObjects.AllSlots())
 					{
 						try
@@ -498,9 +525,10 @@ namespace ResourceRegrowth
 					}
 				}
 				bool zonesChanged = zoneTally != null && zoneTally.reset > 0 && !settings.ZonesDryRun.Value && !dryRun;
+				bool extraRemoved = locationObjects != null && tallies[Kind.LocationObject].extra > 0 && !dryRun;
 				// The world changed and the clocks were reset; a crash before the next autosave would
 				// lose the one and keep the other, so save now (the same call as the autosave).
-				if ((regrown.Count > 0 || terrainStepped || zonesChanged) && ZNet.instance.EnoughDiskSpaceAvailable(out bool _))
+				if ((regrown.Count > 0 || terrainStepped || zonesChanged || extraRemoved) && ZNet.instance.EnoughDiskSpaceAvailable(out bool _))
 				{
 					ZNet.instance.Save(sync: false, saveOtherPlayerProfiles: true, waitForNextFrame: true);
 				}
@@ -520,7 +548,7 @@ namespace ResourceRegrowth
 							? $"terrain zones {t.Value.depleted} modified ({t.Value.waiting} waiting, {t.Value.blocked} all protected, {t.Value.inUse} in use, {t.Value.regrown} {(dryRun ? "would step" : "stepped")})"
 							: t.Key == Kind.LocationObject
 							? $"location objects {t.Value.depleted} missing ({t.Value.waiting} waiting, {t.Value.blocked} near player builds, {t.Value.unsupported} with what held them gone, {t.Value.inUse} in use, "
-								+ $"{t.Value.regrown} {(dryRun ? "would put back" : "put back")})"
+								+ $"{t.Value.regrown} {(dryRun ? "would put back" : "put back")}{(t.Value.extra > 0 ? $", {t.Value.extra} extra {(dryRun ? "would go" : "gone")}" : "")})"
 							: $"{Describe(t.Key)}s {t.Value.depleted} depleted ({t.Value.waiting} waiting, {t.Value.blocked} near player builds, {t.Value.inUse} in use, "
 							+ $"{t.Value.regrown} {(dryRun ? "would regrow" : "regrown")})"))
 					+ (locationObjects != null ? $" ({locationObjects.SourceCount} locations and rooms known{(loadedPrefabs > 0 ? $", {loadedPrefabs} prefab(s) read this pass" : "")})" : "")
@@ -529,7 +557,7 @@ namespace ResourceRegrowth
 						+ $"{zoneTally.reset} {(settings.ZonesDryRun.Value || dryRun ? "would be generated again" : "generated again")}{(zoneTally.failed > 0 ? $", {zoneTally.failed} failed and undone" : "")})" : "")
 					+ $". Scanned {zdos.Count} objects: {work.ElapsedMilliseconds} ms of work spread over {frames} frames ({wall.ElapsedMilliseconds} ms wall)."
 					+ (errors > 0 ? $" {errors} object(s) skipped after errors." : "")
-					+ (regrown.Count > 0 || terrainStepped || zonesChanged ? " World save requested." : ""));
+					+ (regrown.Count > 0 || terrainStepped || zonesChanged || extraRemoved ? " World save requested." : ""));
 				terrainStepped = false;
 				if (zones != null && zones.RefreshDone)
 				{
@@ -736,7 +764,7 @@ namespace ResourceRegrowth
 				tallies[member.kind].depleted++;
 				stillDepleted.Add(key);
 				double hours = Hours(state.DepletedSince(key, now), now);
-				double over = hours - AfterHours(member.kind);
+				double over = hours - AfterHours(member.kind, member.prefab);
 				soonest = Math.Max(soonest, over);
 				if (over >= 0 && over > dueBy)
 				{
@@ -951,6 +979,8 @@ namespace ResourceRegrowth
 			Tally tally, HashSet<string> stillDepleted, HashSet<string> regrown)
 		{
 			Vector2s zone = ZoneSystem.GetZone(slot.position);
+			bool stands = false;
+			List<ZDO> onSpot = null;
 			for (int dy = -1; dy <= 1; dy++)
 			{
 				for (int dx = -1; dx <= 1; dx++)
@@ -966,10 +996,26 @@ namespace ResourceRegrowth
 						float z = p.z - slot.position.z;
 						if (zdo.GetPrefab() == slot.prefab && x * x + z * z <= SlotTolerance * SlotTolerance)
 						{
-							return;
+							stands = true;
+							if ((p - slot.position).sqrMagnitude <= SameSpot * SameSpot && !extraGone.Contains(zdo.m_uid))
+							{
+								if (onSpot == null)
+								{
+									onSpot = new List<ZDO>();
+								}
+								onSpot.Add(zdo);
+							}
 						}
 					}
 				}
+			}
+			if (stands)
+			{
+				if (onSpot != null && onSpot.Count > 1)
+				{
+					RemoveExtra(slot, onSpot, dryRun, blockers, tally);
+				}
+				return;
 			}
 			tally.depleted++;
 			string key = string.Format(CultureInfo.InvariantCulture, "{0}:{1}:{2:0.0}:{3:0.0}:{4:0.0}",
@@ -990,6 +1036,11 @@ namespace ResourceRegrowth
 			if (!LocationObjects.Supported(slot, worldPieces))
 			{
 				tally.unsupported++;
+				if (unsupportedLogged.Add(key))
+				{
+					RegrowthPlugin.Log.LogInfo($"Not putting back {Name(slot.prefab)} of {slot.source} at {slot.position.x:0},{slot.position.y:0},{slot.position.z:0}: what held it is gone "
+						+ $"({string.Join(", ", slot.supports.Select(s => $"{Name(s.prefab)} at {s.position.x:0.0},{s.position.y:0.0},{s.position.z:0.0}"))}).");
+				}
 				return;
 			}
 			if (ZoneSystem.instance.m_zones.ContainsKey(zone))
@@ -1023,6 +1074,52 @@ namespace ResourceRegrowth
 		private const float RemainsRadius = 1.5f;
 		// Remains destroyed in this pass (a destroyed object is only gone once the destroy list is sent).
 		private readonly HashSet<ZDOID> remainsGone = new HashSet<ZDOID>();
+		// Slots already logged as held by something gone, once per run.
+		private readonly HashSet<string> unsupportedLogged = new HashSet<string>();
+
+		/*
+			More objects on a slot's very spot (within 5 cm) than the location's layout has there: one was put
+			back while one stood. Up to 0.8.5 a prefab also in [SurtlingCores] Prefabs never counted as standing
+			(see the scan), and on the live world of 17 Oct 2026 hanging_hairstrands stood up to six on a spot
+			(513 on 149 spots). The extra ones go -- one not picked stays, if there is one -- where putting back
+			could happen too: not near a player's build, in a zone the server has not loaded, owned by nobody
+			connected.
+		*/
+		private const float SameSpot = 0.05f;
+		// Extra objects destroyed in this pass (gone only once the destroy list is sent).
+		private readonly HashSet<ZDOID> extraGone = new HashSet<ZDOID>();
+
+		private void RemoveExtra(LocationObjects.Slot slot, List<ZDO> onSpot, bool dryRun, Dictionary<Vector2s, List<Vector3>> blockers, Tally tally)
+		{
+			int slotsThere = locationObjects.AllSlots().Count(other => other.prefab == slot.prefab && (other.position - slot.position).sqrMagnitude <= SameSpot * SameSpot);
+			if (onSpot.Count <= slotsThere || IsBlocked(blockers, slot.position) || ZoneSystem.instance.m_zones.ContainsKey(ZoneSystem.GetZone(slot.position))
+				|| onSpot.Any(InUse))
+			{
+				return;
+			}
+			// Collected over many frames: an object destroyed since may have been reused for another.
+			List<ZDO> extra = onSpot.Where(zdo => ZDOMan.instance.GetZDO(zdo.m_uid) == zdo).OrderBy(zdo => zdo.GetBool(ZDOVars.s_picked)).Skip(slotsThere).ToList();
+			if (extra.Count == 0)
+			{
+				return;
+			}
+			tally.extra += extra.Count;
+			if (tally.logged < settings.LogDetailsPerPass.Value)
+			{
+				tally.logged++;
+				RegrowthPlugin.Log.LogInfo($"{(dryRun ? "Would remove" : "Removed")} {extra.Count} extra {Name(slot.prefab)} of {slot.source} at "
+					+ $"{slot.position.x:0},{slot.position.y:0},{slot.position.z:0}: {onSpot.Count} stood on a spot the layout has {slotsThere} for.");
+			}
+			if (!dryRun)
+			{
+				foreach (ZDO zdo in extra)
+				{
+					zdo.SetOwner(ZDOMan.GetSessionID());
+					ZDOMan.instance.DestroyZDO(zdo);
+					extraGone.Add(zdo.m_uid);
+				}
+			}
+		}
 
 		// The fractured remains standing at a slot, in zones the server has not loaded.
 		private List<ZDO> RemainsNear(Dictionary<Vector2s, List<ZDO>> remains, Vector3 position)
@@ -1053,11 +1150,11 @@ namespace ResourceRegrowth
 			return found;
 		}
 
-		private float AfterHours(Kind kind)
+		private float AfterHours(Kind kind, int prefab)
 		{
 			switch (kind)
 			{
-				case Kind.Core: return settings.CoresAfterHours.Value;
+				case Kind.Core: return coreHours.TryGetValue(prefab, out float hours) ? hours : settings.CoresAfterHours.Value;
 				case Kind.Chest: return settings.ChestsAfterHours.Value;
 				case Kind.LocationObject: return settings.LocationObjectsAfterHours.Value;
 				default: return settings.SpawnersAfterHours.Value;
@@ -1068,7 +1165,7 @@ namespace ResourceRegrowth
 		{
 			switch (kind)
 			{
-				case Kind.Core: return "surtling core stand";
+				case Kind.Core: return "pickable";
 				case Kind.Chest: return "treasure chest";
 				case Kind.Terrain: return "terrain zone";
 				case Kind.LocationObject: return "location object";

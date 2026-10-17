@@ -83,7 +83,7 @@ namespace ResourceRegrowth
 			CoresAfterHours = config.Bind("SurtlingCores", "AfterHours", 10f,
 				"Real hours after a core was taken (or after the plugin first saw it taken).");
 			CorePrefabs = config.Bind("SurtlingCores", "Prefabs", "Pickable_SurtlingCoreStand",
-				"Pickables that stay in place when taken (hide-when-picked) and should come back. Comma separated.");
+				"Pickables that stay in place when taken (hide-when-picked) and should come back. Comma separated. A prefab may carry its own hours after a colon instead of AfterHours: goblin_totempole:24 is the totem on a Fuling totem pole (villages, stone towers), back with the village's creatures and chests rather than sooner.");
 
 			ChestsEnabled = config.Bind("TreasureChests", "Enabled", true,
 				"Restock treasure chests (never player-built chests) with fresh loot from their own loot table; whatever was left in them is replaced.");

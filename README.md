@@ -1,6 +1,6 @@
 # Sarkastic.gg Resource Regrowth
 
-![version: 0.8.5](https://img.shields.io/badge/version-0.8.5-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
+![version: 0.8.6](https://img.shields.io/badge/version-0.8.6-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
 
 [Source code](https://github.com/MistrCech/valheim-resource-regrowth)  ·  [Report a bug](https://github.com/MistrCech/valheim-resource-regrowth/issues/new)  ·  [Changelog](https://github.com/MistrCech/valheim-resource-regrowth/blob/main/CHANGELOG.md)  ·  [Dedicated Simulation](https://thunderstore.io/c/valheim/p/Sarkastic_gg/Dedicated_Simulation/)
 
@@ -53,8 +53,18 @@ world, so it is created again. Where it stood is known exactly, not guessed:
 
 Checked on a live world: of 169 beehive places the replay said 47 had a hive, and all 29 hives still
 standing were on exactly those places (same height to the centimetre), none anywhere else.
-A hive hangs under the roof of its house; when the pieces of the house that held it are gone
-(pulled down by players), the hive is not put back, so nothing floats in the air.
+An object is put back only while something breakable the location built around it still stands (within 3 m, at
+most 0.5 m above it), so nothing floats in the air: a hive hangs under the roof of its house, and when players
+have pulled the house down, it is not put back. One of them standing is enough, and the same test (WearNTear)
+picks them from the layout and finds them in the world, so a dungeon's bench or training dummy beside a fire pit
+counts too. Objects of the list itself do not -- two fire pits side by side, both broken, would wait for each
+other. An object that waits is logged once, with what held it:
+`Not putting back Morkhalla_firepit of morkhalla_endcap01 at -1352,5001,8263: what held it is gone (Morkhalla_Trainingdummy1 at -1351.0,5001.5,8260.8).`
+
+More objects of the list on one spot (within 5 cm) than the location's layout has there are put right: the extra
+ones go -- one not picked stays -- where putting back could happen too. Up to 0.8.5 a pickable that is also in
+`[SurtlingCores] Prefabs` (`hanging_hairstrands`) never counted as standing, so every place of it got one more each
+time its hours were up: on the live world of 17 October 2026, 513 of them stood on 149 spots, up to six on one.
 
 A pile or rock that is hit does not vanish at once: the game replaces it with its fractured remains
 (`<name>_frac`), which are what is mined. So when an object is put back, the remains of it within 1.5 m
@@ -87,6 +97,23 @@ Every `CheckIntervalMinutes` the plugin scans the world. A location (or a lone o
   Dedicated Simulation, for example, loads the zones around players on the server.
 
 A scan of a large world (165,000 objects) takes about 15 ms of work, spread over about 40 frames.
+
+### Boss items
+
+What bosses are summoned with must not run out on a world that is played for years. Most of it comes from
+creatures, which keep spawning (deer trophies, ancient seeds, Seeker brute trophies), or comes back by itself (a
+dragon egg, 8 hours after it was taken); withered bones come from the scrap piles of sunken crypts (`mudpile2`,
+above) and their chests. What the world placed only once comes back with these entries (Valheim 1.0.20):
+
+| For | Comes from | Entry |
+|---|---|---|
+| Yagluth: 3 Fuling totems (`GoblinTotem`) | the totem on a pole in Fuling villages and stone towers (`goblin_totempole`); Fuling berserkers drop one now and then | `[SurtlingCores] Prefabs`: `goblin_totempole:24` -- taken from its pole, it is back with the village's creatures and chests |
+| Fader: 3 bells, made of fragments (`BellFragment`) | the altars of a Charred fortress (`Charred_altar_bellfragment`), the only source | `[LocationObjects] Prefabs`: `Charred_altar_bellfragment` |
+| the Seeker Queen's door: the key, made of fragments (`DvergrKeyFragment`) | the crystal altars of infested mines (`blackmarble_altar_crystal`) | `[LocationObjects] Prefabs`: `blackmarble_altar_crystal` |
+| the memorial (`NorthMemorialPlace`): 3 memorial coal (`MemorialCoal`) | coal piles and fire pits in the Morkhalla dungeons of `MorkBorg` (`Morkhalla_coal_pile_memorial`, `Morkhalla_firepit`); `JotunWarrior` drops one now and then | `[LocationObjects] Prefabs`: both |
+
+Hateful blood (`HatefulBlood`, three for `FrozenKing`) comes only from `BlackIce_Core`, which only `FimbulLocation01`
+has, and the game does not generate that location in 1.0.20; there is nothing to regrow yet.
 
 ### Zones
 
@@ -213,13 +240,13 @@ applied at startup.
 | Safety | PlayerBuildRadius | 48 | metres around player-built pieces and tombstones that are never touched |
 | Locations | Together | true | a location regrows as a whole: once one thing in it is due, every core, creature and chest in it comes back |
 | SurtlingCores | Enabled / AfterHours | true / 10 | |
-| SurtlingCores | Prefabs | Pickable_SurtlingCoreStand | hide-when-picked, non-respawning pickables to restore |
+| SurtlingCores | Prefabs | Pickable_SurtlingCoreStand | hide-when-picked, non-respawning pickables to restore; `name:hours` gives one its own hours instead of AfterHours (`goblin_totempole:24`, the Fuling totem) |
 | TreasureChests | Enabled / AfterHours | true / 24 | hours after a player was first near the chest (or it was seen empty) since it was last restocked |
 | TreasureChests | ExcludePrefabs | | chest prefabs never to refill, e.g. `TreasureChest_meadows_buried` |
 | DungeonMonsters | Enabled / AfterHours | true / 24 | |
 | DungeonMonsters | ExcludePrefabs | | spawner prefabs never to reset |
 | LocationObjects | Enabled / AfterHours | false / 48 | put back destroyed objects of locations and villages (needs a restart) |
-| LocationObjects | Prefabs | Beehive | which ones; only world-generated objects are ever put back |
+| LocationObjects | Prefabs | Beehive | which ones; only world-generated objects are ever put back (boss items: see Boss items) |
 | Zones | Enabled | false | generate visited zones again as the world first made them (needs a restart) |
 | Zones | DryRun | true | only log which zones would be generated again |
 | Zones | IdleHours | 72 | real hours with nobody near before a zone is generated again |

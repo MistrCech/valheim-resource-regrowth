@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.8.6] - 2026-10-17
+
+### Added
+
+- An entry of `[SurtlingCores] Prefabs` may carry its own hours after a colon instead of the section's `AfterHours`:
+  `goblin_totempole:24` is the totem on a Fuling totem pole (villages, stone towers). Yagluth is summoned with three,
+  and vanilla never puts one back on its pole; taken, it is back with the village's creatures and chests rather than
+  sooner. The startup line lists each pickable with its hours. Tested on a copy of the live world, both ways round:
+  three totems taken from poles in two Fuling villages and a stone tower came back while two surtling cores taken with
+  them waited for their own `:24`, and with `goblin_totempole:24` the cores came back while the totems waited.
+- README: "Boss items" -- what bosses are summoned with, where it comes from and which entries keep it from running out
+  on a long-lived world: `goblin_totempole:24`, and in `[LocationObjects] Prefabs` `Charred_altar_bellfragment` (the
+  altars of a Charred fortress, the only source of Fader's bell fragments), `blackmarble_altar_crystal` (the crystal
+  altars of infested mines, the fragments of the Seeker Queen's key), `Morkhalla_coal_pile_memorial` and
+  `Morkhalla_firepit` (memorial coal). Tested on the same copy: the bell altars broken in two Charred fortresses and
+  six crystal altars in two infested mines were put back at their own places (0.00 m off), and so were all ten fire
+  pits and coal piles broken in a Morkhalla room, three of them beside a bench or a training dummy (see Fixed).
+- A location object that is not put back because what held it is gone is logged once, with what held it.
+
+### Fixed
+
+- `[LocationObjects]`: an object of the list that is also in `[SurtlingCores] Prefabs` (`hanging_hairstrands` on the
+  live server) never counted as standing: the scan sorted it as a pickable only. Every place of it looked empty, and
+  one more was put on it each time `AfterHours` was up -- on the live world of 17 October 2026 there were 513
+  `hanging_hairstrands` on 149 spots, up to six on one. (`Pickable_MountainCaveCrystal` is in both lists there too,
+  but it is not a non-respawning hide-when-picked pickable, so `[SurtlingCores]` ignores it: one stood on each of its
+  255 spots.) What stands is now noted apart from what kind of thing it is, and more objects on one spot (within 5 cm)
+  than the location's layout has there are put right: the extra ones go, one not picked stays, where putting back
+  could happen too (not near a player's build, in a zone the server has not loaded). Tested on the live copy with the
+  live settings: the first pass removed the 364 extra ones on 115 spots, one stayed on each of the 149 spots, and none
+  was put back again in the four passes after; no other prefab's count changed except by what was put back.
+- `[LocationObjects]`: two objects of the list could each count as what held the other up, so two fire pits side by
+  side, both broken, waited for each other forever. Objects of the list hold nothing now.
+- `[LocationObjects]`: what holds an object up was picked from the location's layout among everything breakable
+  (WearNTear) but looked for in the world only among buildable pieces (Piece), so an object beside something
+  breakable that is not a buildable piece -- a Morkhalla bench or training dummy beside a fire pit, a green ground
+  torch beside a scrap pile in a sunken crypt -- waited for it forever, though it stood. One test does both now
+  (`LocationObjects.Holds`). On the live copy 12 scrap piles of one crypt waited for such torches; 11 came back, and
+  the twelfth still waits: no torch stands where its stood.
+
 ## [0.8.5] - 2026-10-13
 
 ### Added
