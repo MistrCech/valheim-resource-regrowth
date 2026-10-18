@@ -69,6 +69,7 @@ namespace ResourceRegrowth
 		private readonly HashSet<int> tombstonePrefabs = new HashSet<int>();
 		private readonly int terrainPrefab = Terrain.CompilerPrefab.GetStableHashCode();
 		private Dictionary<int, float> protectorPrefabs = new Dictionary<int, float>();
+		private static readonly int WorkbenchHash = "piece_workbench".GetStableHashCode();
 		private readonly Dictionary<int, string> prefabNames = new Dictionary<int, string>();
 		private LocationObjects locationObjects;
 		private ZoneReset zones;
@@ -86,7 +87,7 @@ namespace ResourceRegrowth
 		{
 			BuildPrefabSets();
 			protectorPrefabs = Terrain.ProtectorPrefabs(settings.TerrainProtectMultiplier.Value, out List<string> protectorNames);
-			RegrowthPlugin.Log.LogInfo($"Terrain{(settings.TerrainEnabled.Value ? "" : " (off)")}: ground is protected around {protectorPrefabs.Count} kinds of base object and ward: {string.Join(", ", protectorNames)}");
+			RegrowthPlugin.Log.LogInfo($"Terrain{(settings.TerrainEnabled.Value ? "" : " (off)")}: ground is protected around {protectorPrefabs.Count} kinds of base object and ward: {string.Join(", ", protectorNames)}; a workbench keeps the ground within {settings.TerrainWorkbenchRadius.Value:0} m at least (Terrain WorkbenchRadius)");
 			if (settings.LocationObjectsEnabled.Value)
 			{
 				locationObjects = new LocationObjects(SplitList(settings.LocationObjectsPrefabs.Value));
@@ -350,6 +351,11 @@ namespace ResourceRegrowth
 					}
 					if (protectorPrefabs.TryGetValue(prefab, out float protectRadius) && zdo.GetLong(ZDOVars.s_creator, 0L) != 0L && zdo.GetBool(ZDOVars.s_enabled, true))
 					{
+						// A workbench keeps the ground around it as far as a zone is kept from being generated again, not only as far as its own radius.
+						if (prefab == WorkbenchHash)
+						{
+							protectRadius = Mathf.Max(protectRadius, settings.TerrainWorkbenchRadius.Value);
+						}
 						AddProtector(protectors, zdo.GetPosition(), protectRadius);
 					}
 					if (settings.CoresEnabled.Value && corePrefabs.ContainsKey(prefab))
@@ -859,6 +865,12 @@ namespace ResourceRegrowth
 			string key = Key(Kind.Terrain, zdo);
 			string stepKey = "step" + key;
 			stillDepleted.Add(key);
+			// The time of the last step is kept whatever this pass decides: it used to be dropped whenever the zone was not idle, so that the first
+			// pass after the players had left stepped the ground again at once, however short a time ago the last step was (StepHours).
+			if (state.HasKey(stepKey))
+			{
+				stillDepleted.Add(stepKey);
+			}
 			Vector3 position = zdo.GetPosition();
 			double modified = Hours(state.DepletedSince(key, now), now);
 			double idle = Hours(state.LastSeen(ZoneSystem.GetZone(position)), now);

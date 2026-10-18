@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.8.8] - 2026-10-18
+
+### Fixed
+
+- Terrain regrowth stepped a zone again at once after the players had left it, however short a time ago the last step was:
+  the time of the last step was dropped from the state in every pass that found the zone not idle (a player within
+  `PresenceRadiusZones`), so the first pass after they left found no last step and stepped again, instead of waiting
+  `StepHours` (24). A zone a player kept coming back to (a base) was eroded once for each time they went away for the
+  idle hours, not once a day, and no step was written down for it. Found on the live world: the unprotected part of a
+  player's moat (a base on the start island) had lost two steps in twenty hours -- every height change outside the
+  workbenches' circles divided by 1.7 twice, those under 0.34 m gone -- and the state file held no step for those zones.
+  Tested on a copy of the live world with the clocks run down (AfterHours 0.01, StepHours 0.5), one fake player visiting
+  a zone between two passes: the old build stepped three zones (the visited one and two within `PresenceRadiusZones`) a second time
+  within six minutes, the fixed one none of the 103 zones twice.
+
+### Added
+
+- `[Terrain] WorkbenchRadius` (48): ground within this many metres of a player's workbench is left as it is, whatever the
+  workbench's own radius (10 m for `piece_workbench`) -- the distance that keeps a zone from being generated again
+  (`[Safety] PlayerBuildRadius`). A base is built around its workbench and a moat, a levelled yard or a ramp dug around it
+  mostly lies outside 10 m. Read at every pass, 0 gives the old behaviour. On the live world 4254 of 17300 modified vertices
+  were open (not under any base object, 24.6 %), and the radius protects 41 % of those; the 386 open ones of the base
+  above were all within 48 m of a workbench. Tested on a copy of that world: of its six zones none was stepped any more
+  (before, 51 of 1484 height changes of the biggest went in one step) and the number of zones of the world with everything
+  protected rose from 25 to 49.
+
 ## [0.8.7] - 2026-10-18
 
 ### Changed

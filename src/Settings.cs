@@ -56,6 +56,7 @@ namespace ResourceRegrowth
 		public readonly ConfigEntry<bool> TerrainKeepCultivated;
 		public readonly ConfigEntry<float> TerrainProtectMultiplier;
 		public readonly ConfigEntry<float> TerrainProtectPiecesRadius;
+		public readonly ConfigEntry<float> TerrainWorkbenchRadius;
 
 		public Settings(ConfigFile config)
 		{
@@ -143,6 +144,8 @@ namespace ResourceRegrowth
 				"Leave cultivated ground cultivated (fields).");
 			TerrainProtectMultiplier = config.Bind("Terrain", "ProtectMultiplier", 1f,
 				"The protected radius around a base object or ward is its own radius times this.");
+			TerrainWorkbenchRadius = config.Bind("Terrain", "WorkbenchRadius", 48f,
+				"Ground within this many metres of a player's workbench stays as it is, whatever the workbench's own radius (10 m): the distance that keeps a zone from being generated again (Safety PlayerBuildRadius), so a ditch, a moat or a levelled yard dug around a base is kept with it. 0 = a workbench protects only its own radius. Read at every pass.");
 			TerrainProtectPiecesRadius = config.Bind("Terrain", "ProtectPiecesRadius", 0f,
 				"Also protect this many metres around any player-built piece or tombstone (0 = only bases and wards). The same list of pieces as PlayerBuildRadius uses.");
 		}

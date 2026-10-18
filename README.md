@@ -1,6 +1,6 @@
 # Sarkastic.gg Resource Regrowth
 
-![version: 0.8.7](https://img.shields.io/badge/version-0.8.7-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
+![version: 0.8.8](https://img.shields.io/badge/version-0.8.8-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
 
 [Source code](https://github.com/MistrCech/valheim-resource-regrowth)  ·  [Report a bug](https://github.com/MistrCech/valheim-resource-regrowth/issues/new)  ·  [Changelog](https://github.com/MistrCech/valheim-resource-regrowth/blob/main/CHANGELOG.md)  ·  [Dedicated Simulation](https://thunderstore.io/c/valheim/p/Sarkastic_gg/Dedicated_Simulation/)
 
@@ -199,7 +199,10 @@ hour. `DryRun` (on by default) only logs which zones would be generated again an
 Ground within the radius of a **player base object** -- anything the game itself treats as a base
 when it decides where creatures may not spawn (a PlayerBase effect area: workbench, forge,
 stonecutter, beds, fires ...) -- or of a **ward** is left as it is; the radius is the object's own
-(`ProtectMultiplier` scales it). A base that is gone, say a workbench broken by creatures, protects
+(`ProtectMultiplier` scales it), except that a **workbench** keeps the ground within `WorkbenchRadius`
+(48 m, the distance that keeps a zone from being generated again), because a workbench is what a base is
+built around and its own radius is only 10 m: a moat or a levelled yard dug around a house lies mostly
+outside that. A base that is gone, say a workbench broken by creatures, protects
 nothing any more, and the land returns. `ProtectPiecesRadius` (0) adds a radius around every
 player-built piece and tombstone for those who want roads and fields kept whole; paved and
 cultivated paint is kept anyway (`KeepPaved`, `KeepCultivated`), only its height returns. The log
@@ -262,6 +265,12 @@ applied at startup.
 | SurtlingCores | Prefabs | Pickable_SurtlingCoreStand | hide-when-picked, non-respawning pickables to restore; `name:hours` gives one its own hours instead of AfterHours (`goblin_totempole:24`, the Fuling totem) |
 | TreasureChests | Enabled / AfterHours | true / 24 | hours after a player was first near the chest (or it was seen empty) since it was last restocked |
 | TreasureChests | ExcludePrefabs | | chest prefabs never to refill, e.g. `TreasureChest_meadows_buried` or `shipwreck_karve_chest` |
+| Terrain | Enabled / AfterHours / StepHours | true / 48 / 24 | what players dug or paved is first stepped back 48 h after it was first seen, once nobody has been near for `Safety IdleHours`, and then at most once every 24 h |
+| Terrain | Divider / MinDelta | 1.7 / 0.2 | a step divides every height change outside a protected area by this and drops it once below this many metres |
+| Terrain | ProtectMultiplier | 1 | the protected radius of a base object or ward is its own times this |
+| Terrain | WorkbenchRadius | 48 | metres around a player's workbench that are never stepped back (its own radius is 10); 0 = only its own |
+| Terrain | ProtectPiecesRadius | 0 | also protect this many metres around any player-built piece or tombstone |
+| Terrain | KeepPaved / KeepCultivated | true / true | paved and cultivated ground stays so; only its height returns |
 | DungeonMonsters | Enabled / AfterHours | true / 24 | |
 | DungeonMonsters | ExcludePrefabs | | spawner prefabs never to reset |
 | LocationObjects | Enabled / AfterHours | false / 48 | put back destroyed objects of locations and villages (needs a restart) |
