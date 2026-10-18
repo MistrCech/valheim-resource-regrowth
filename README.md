@@ -1,6 +1,6 @@
 # Sarkastic.gg Resource Regrowth
 
-![version: 0.8.6](https://img.shields.io/badge/version-0.8.6-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
+![version: 0.8.7](https://img.shields.io/badge/version-0.8.7-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
 
 [Source code](https://github.com/MistrCech/valheim-resource-regrowth)  ·  [Report a bug](https://github.com/MistrCech/valheim-resource-regrowth/issues/new)  ·  [Changelog](https://github.com/MistrCech/valheim-resource-regrowth/blob/main/CHANGELOG.md)  ·  [Dedicated Simulation](https://thunderstore.io/c/valheim/p/Sarkastic_gg/Dedicated_Simulation/)
 
@@ -10,7 +10,7 @@ A server-side [BepInEx](https://github.com/BepInEx/BepInEx) plugin for Valheim 1
 It brings one-time world content back once an area has been left alone for a while:
 
 - **Surtling core stands** get their core back.
-- **Treasure chests** (never player-built ones, and never one holding something of a player's) are restocked with fresh loot, whatever was left in them replaced.
+- **Treasure chests** (never player-built ones, and never one holding something of a player's) are restocked with fresh loot, whatever was left in them replaced. So are the other containers the world comes with a loot table of their own for: a shipwreck's chest, the granaries and timber halls of the Deep North, the ancient chests of Morkhalla.
 - **One-time creature spawners** (dungeons, camps, caves) spawn their creature again.
 - A **location regrows as a whole**: a dungeon with its entrance, a camp, a village or a ruin comes
   back all at once -- every core, every creature and every chest in it.
@@ -114,6 +114,25 @@ above) and their chests. What the world placed only once comes back with these e
 
 Hateful blood (`HatefulBlood`, three for `FrozenKing`) comes only from `BlackIce_Core`, which only `FimbulLocation01`
 has, and the game does not generate that location in 1.0.20; there is nothing to regrow yet.
+
+### For players who come later
+
+On a world that new players keep joining, what the game placed once and what only the zone reset brings back is not
+enough where the zone reset does not go: places the game makes only once (`PlaceofMystery`, traders, the
+Ancient upgrade station), Hildir's dungeons and boss arenas (`[Zones] ProtectedLocations`), and anything within 48 m
+of a workbench. Valheim 1.0.20 has these, scarce and needed, that no hourly list covers by default:
+
+| What | Where | Entry |
+|---|---|---|
+| Dyrnwyn: blade and tip fragments (`DyrnwynBladeFragment`, `DyrnwynTipFragment`) | the three `PlaceofMystery` places of the Ashlands, placed once per world (the hilt, `Pickable_Swordpiece1`, is put by no place or room the scan of 1.0.20 found) | `[LocationObjects] Prefabs`: `Pickable_Swordpiece1,Pickable_Swordpiece2,Pickable_Swordpiece3` |
+| Molten cores (`MoltenCore`) | the stands of `PlaceofMystery`, `CharredFortress` and `MorgenHole` (picked, they vanish) | `[LocationObjects] Prefabs`: `Pickable_MoltenCoreStand` |
+| Black cores (`BlackCore`) | the stands in the Dvergr towns under the Mistlands | `[SurtlingCores] Prefabs`: `Pickable_BlackCoreStand` (they stay in place when taken, like surtling cores) |
+| Frost cores (`FrostCore`) | the hangers in the Hole of the Deep North | `[SurtlingCores] Prefabs`: `Pickable_FrostCoreHanger` |
+| Tar (`Tar`) | the blobs of tar pits; picked, they vanish and vanilla never puts them back (the creatures of a pit come back with `[DungeonMonsters]`) | `[LocationObjects] Prefabs`: `Pickable_Tar,Pickable_TarBig` |
+| Black Metal and Black Marble idols (`Upgrader4*`, `Upgrader5*`, the tokens of the Ancient upgrade station) in Hildir's Sealed Tower | the trash piles of the dungeon (`goblin_trashpile`), which the zone reset skips | `[LocationObjects] Prefabs`: `goblin_trashpile` |
+
+The Morkhalla eyes (`Morkhalla_Eye1` to `Morkhalla_Eye7_gemstone`: gemstones, hundreds in one hall) are no entry
+here: listed in `[SurtlingCores]` they would bring a gem hoard back on every visit.
 
 ### Zones
 
@@ -242,7 +261,7 @@ applied at startup.
 | SurtlingCores | Enabled / AfterHours | true / 10 | |
 | SurtlingCores | Prefabs | Pickable_SurtlingCoreStand | hide-when-picked, non-respawning pickables to restore; `name:hours` gives one its own hours instead of AfterHours (`goblin_totempole:24`, the Fuling totem) |
 | TreasureChests | Enabled / AfterHours | true / 24 | hours after a player was first near the chest (or it was seen empty) since it was last restocked |
-| TreasureChests | ExcludePrefabs | | chest prefabs never to refill, e.g. `TreasureChest_meadows_buried` |
+| TreasureChests | ExcludePrefabs | | chest prefabs never to refill, e.g. `TreasureChest_meadows_buried` or `shipwreck_karve_chest` |
 | DungeonMonsters | Enabled / AfterHours | true / 24 | |
 | DungeonMonsters | ExcludePrefabs | | spawner prefabs never to reset |
 | LocationObjects | Enabled / AfterHours | false / 48 | put back destroyed objects of locations and villages (needs a restart) |

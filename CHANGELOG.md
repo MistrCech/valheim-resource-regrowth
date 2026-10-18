@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.8.7] - 2026-10-18
+
+### Changed
+
+- `[TreasureChests]` restocks every container of the world that comes with a loot table of its own, not only the ones named
+  `TreasureChest_*`: a shipwreck's chest (`shipwreck_karve_chest`, `shipwreck_vikingship_chest`), the granaries and timber halls
+  of the Deep North (`loot_deepNorth_Granary`, `loot_deepNorth_TimberHall`) and the ancient chests of Morkhalla
+  (`Morkhalla_ChestAncient`): 32 kinds instead of 27. Player-built chests have no loot table and stay out; `ExcludePrefabs`
+  keeps any prefab out. (A `Piece` component is no sign of a built chest: the treasure chests have one too, which a first
+  version of this change took for one and the test caught: 2 kinds instead of 32.) Tested on a copy of the live world: three
+  emptied wreck chests, two meadow chests and two sunken crypt chests were each filled again from their own loot table.
+
+### Added
+
+- README, "For players who come later": what the game puts once and neither vanilla nor the zone reset brings back where
+  new players need it -- the Dyrnwyn fragments of the three `PlaceofMystery` places of the Ashlands (placed once, so
+  the zone reset never touches them), molten cores, black cores (`Pickable_BlackCoreStand`) and frost cores
+  (`Pickable_FrostCoreHanger`), tar, and the idols of Hildir's Sealed Tower (`goblin_trashpile`) -- and the entries that
+  bring them back (`[LocationObjects] Prefabs`, `[SurtlingCores] Prefabs`; no code, only config). Tested on a copy of the
+  live world with those entries: 121 destroyed objects of those kinds (tar of a pit, molten core stands and Dyrnwyn
+  fragments of `PlaceofMystery`, sulfur rocks, the trash piles of the Sealed Tower) were put back where they stood, no
+  slot twice (tar floats, so it settles a little off its place; none of it was put back again), and the startup accepted the
+  black core stand and the frost core hanger as pickables that stay in place when taken.
+
 ## [0.8.6] - 2026-10-17
 
 ### Added

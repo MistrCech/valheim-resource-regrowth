@@ -233,14 +233,16 @@ namespace ResourceRegrowth
 						RegrowthPlugin.Log.LogWarning($"{prefab.name} is not a non-respawning hide-when-picked pickable; ignored.");
 					}
 				}
-				if (prefab.name.StartsWith("TreasureChest_", StringComparison.Ordinal) && !excludedChests.Contains(prefab.name))
+				if (!excludedChests.Contains(prefab.name))
 				{
+					// A treasure chest by its name, or any other container of the world that comes with a loot table of its own -- a shipwreck's chest, a Deep North granary,
+					// a chest of Morkhalla. What the players build has no loot table (and a Piece component is no sign of it: the treasure chests have one too).
 					Container container = prefab.GetComponent<Container>();
 					if (container && !container.m_rootObjectOverride && container.m_defaultItems.m_drops.Count > 0)
 					{
 						chestPrefabs[hash] = container;
 					}
-					else
+					else if (prefab.name.StartsWith("TreasureChest_", StringComparison.Ordinal))
 					{
 						RegrowthPlugin.Log.LogInfo($"{prefab.name} has no container with a loot table of its own; ignored.");
 					}

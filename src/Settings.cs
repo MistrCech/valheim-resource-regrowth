@@ -86,11 +86,11 @@ namespace ResourceRegrowth
 				"Pickables that stay in place when taken (hide-when-picked) and should come back. Comma separated. A prefab may carry its own hours after a colon instead of AfterHours: goblin_totempole:24 is the totem on a Fuling totem pole (villages, stone towers), back with the village's creatures and chests rather than sooner.");
 
 			ChestsEnabled = config.Bind("TreasureChests", "Enabled", true,
-				"Restock treasure chests (never player-built chests) with fresh loot from their own loot table; whatever was left in them is replaced.");
+				"Restock treasure chests and the other containers the world comes with a loot table of their own for -- a shipwreck's chest, a Deep North granary, a chest of Morkhalla (never player-built chests) -- with fresh loot from that table; whatever was left in them is replaced.");
 			ChestsAfterHours = config.Bind("TreasureChests", "AfterHours", 24f,
 				"Real hours after a player was first near a chest (or it was seen empty) since it was last restocked. Whether anything was taken cannot be told from a chest, so being near it counts.");
 			ChestsExclude = config.Bind("TreasureChests", "ExcludePrefabs", "",
-				"Chest prefabs never to refill, e.g. TreasureChest_meadows_buried for dug-up treasure. Comma separated.");
+				"Chest prefabs never to refill, e.g. TreasureChest_meadows_buried for dug-up treasure or shipwreck_karve_chest for the chests of wrecks. Comma separated.");
 
 			SpawnersEnabled = config.Bind("DungeonMonsters", "Enabled", true,
 				"Let one-time creature spawners (dungeons, camps, caves) spawn again once their creature is dead.");
