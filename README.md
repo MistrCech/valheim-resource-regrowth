@@ -1,6 +1,6 @@
 # Sarkastic.gg Resource Regrowth
 
-![version: 0.8.8](https://img.shields.io/badge/version-0.8.8-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
+![version: 0.8.9](https://img.shields.io/badge/version-0.8.9-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
 
 [Source code](https://github.com/MistrCech/valheim-resource-regrowth)  ·  [Report a bug](https://github.com/MistrCech/valheim-resource-regrowth/issues/new)  ·  [Changelog](https://github.com/MistrCech/valheim-resource-regrowth/blob/main/CHANGELOG.md)  ·  [Dedicated Simulation](https://thunderstore.io/c/valheim/p/Sarkastic_gg/Dedicated_Simulation/)
 
@@ -26,7 +26,7 @@ It brings one-time world content back once an area has been left alone for a whi
   ever been there. Never at a base (a workbench); players' things stay as they are.
 
 Players need nothing: vanilla clients work. The plugin depends on BepInEx and nothing else. It
-patches one game method, and only with Zones switched on (see Zones).
+patches two game methods, each only with its part switched on (Zones; Location objects).
 
 **Recommended with [Dedicated Simulation](https://thunderstore.io/c/valheim/p/Sarkastic_gg/Dedicated_Simulation/)** (`Sarkastic_gg/Dedicated_Simulation`, [GitHub](https://github.com/MistrCech/valheim-serverside)), a fork of Serverside Simulations by ddormer that keeps the world simulated on the server. This plugin works on its own, but the two are made to run together: the zone reset generates a zone the way Dedicated Simulation does.
 
@@ -134,6 +134,43 @@ of a workbench. Valheim 1.0.20 has these, scarce and needed, that no hourly list
 The Morkhalla eyes (`Morkhalla_Eye1` to `Morkhalla_Eye7_gemstone`: gemstones, hundreds in one hall) are no entry
 here: listed in `[SurtlingCores]` they would bring a gem hoard back on every visit.
 
+### Buildings of a camp or village
+
+The walls, poles, roofs and stairs of a Fuling village, camp or stone tower are location objects too. Listed in
+`Prefabs`, a building players pulled down comes back after the section's `AfterHours` (48 by default; 24 brings it back
+with the place's creatures and chests) instead of only when `[Zones]` generates its zone again after three idle days --
+and in a protected location too, which the zone reset never generates again. The Fuling pieces of Valheim 1.0.20:
+
+`goblin_woodwall_1m,goblin_woodwall_2m,goblin_woodwall_2m_ribs,goblin_pole,goblin_pole_small,goblin_roof_45d,goblin_roof_45d_corner,goblin_roof_cap,goblin_stairs,goblin_stepladder,goblin_fence,goblin_banner,goblin_bed,stone_wall_2x1,wood_wall_log,wood_stepladder`
+
+A piece (anything of the list the game treats as breakable, `WearNTear`: walls, but the cloth hangings and braziers of
+the default list too) counts as standing only on its own place: within 10 cm, at the same height -- one the game
+settles on the ground after placing it (`SnapToGround`, the log benches) at any height. So of two walls stacked one on
+the other, the lower one no longer stands in for the upper one.
+
+Pieces of the list do not hold each other up for the rule above, so all of a building's missing pieces come back in the
+same pass, and the game's own support test decides what stands: once a player comes near, a piece with nothing under it
+falls, as a player's would. Such a piece is not put back again -- it would come back every `AfterHours` and fall at every
+visit, its wood dropped each time -- until one the game made stands in its place once more, which in practice is when
+`[Zones]` generates its zone again; from then on it is put back as before. Both are logged:
+
+`goblin_banner at -5053,41,1197, put back 0.07 h ago, fell for lack of support: not put back again before something stands in its place once more (its zone generated again).`
+
+`goblin_banner of gobvill_hut03 at -5053,41,1197, which fell after being put back, stands in its place again; it is put back as before from now on.`
+
+The fall is seen only where the server runs the piece -- with Dedicated Simulation, which simulates what is near
+players; without it a player's game runs the fall, and such a piece comes back every `AfterHours`. Where its zone is
+never generated again (a protected location, `[Zones]` off), a piece that fell stays out. So does one that fell
+because players broke what held it, until the zone is generated again, even once what held it is back. A piece put
+back before 0.8.9 carries no sign of it: if it falls, it comes back once more and is told the next time. The state
+file keeps these as `fell` lines, also while `[LocationObjects]` is off.
+
+Tested on a copy of the live world (23 October 2026) with these 16 prefabs added to the default list and the clocks
+run down: of 272 missing pieces 185 were put back (stone towers, villages, camps), 83 waited near players' builds and 3
+for a totem pole that had held them. Each of the 177 in the 10 zones then generated again by the game itself stood where
+the game puts its own, to the millimetre, and none beside one standing. With a simulated player near a village for two
+minutes, one banner fell, was not put back again, and stood again when `[Zones]` generated the village.
+
 ### Zones
 
 Vanilla never brings back a felled tree, a mined copper or tin deposit, a stone tower or a house
@@ -151,8 +188,8 @@ moment).
 
 A location comes back the way round it was: the game draws its rotation from an unseeded random
 number when it first places it, so the rotation is read from the location's own record before the
-zone is cleared and given back when it is placed again (a patch of `ZoneSystem.SpawnLocation`, the
-only game method this plugin touches). With the same rotation its dungeon gets the same seed and the
+zone is cleared and given back when it is placed again (a patch of `ZoneSystem.SpawnLocation`). With
+the same rotation its dungeon gets the same seed and the
 same rooms. Because old objects are matched to what the game made object by object, a location or
 dungeon that reaches over the zone's edge (a boar runestone's spawners, a crypt's rooms) is replaced
 there too, and a neighbour's objects reaching into the zone stay.
@@ -221,7 +258,8 @@ After a pass that regrew anything the world is saved right away (the same call a
 a crash cannot lose the regrowth while keeping the reset clocks.
 
 What it remembers is kept in `<world>.regrowth.txt` next to the world save. That file records
-when players were last near each zone, and since when each object has been depleted.
+when players were last near each zone, since when each object has been depleted, and which pieces it put
+back fell.
 
 Objects are identified by prefab and position, because the game hands out new object ids on
 every world load.
@@ -274,7 +312,7 @@ applied at startup.
 | DungeonMonsters | Enabled / AfterHours | true / 24 | |
 | DungeonMonsters | ExcludePrefabs | | spawner prefabs never to reset |
 | LocationObjects | Enabled / AfterHours | false / 48 | put back destroyed objects of locations and villages (needs a restart) |
-| LocationObjects | Prefabs | Beehive | which ones; only world-generated objects are ever put back (boss items: see Boss items) |
+| LocationObjects | Prefabs | Beehive | which ones; only world-generated objects are ever put back (boss items: see Boss items; walls and roofs: see Buildings of a camp or village) |
 | Zones | Enabled | false | generate visited zones again as the world first made them (needs a restart) |
 | Zones | DryRun | true | only log which zones would be generated again |
 | Zones | IdleHours | 72 | real hours with nobody near before a zone is generated again |

@@ -6,20 +6,23 @@ namespace ResourceRegrowth
 {
 	/*
 		Server-side only: runs on a dedicated server, changes world objects directly, and needs
-		nothing on clients. Depends on BepInEx and nothing else. Patches one game method, and only
-		with [Zones] switched on: ZoneSystem.SpawnLocation, to place a location of a zone generated
-		again the way round it was (ZoneReset).
+		nothing on clients. Depends on BepInEx and nothing else. Patches two game methods, each only
+		with its part switched on: ZoneSystem.SpawnLocation with [Zones], to place a location of a zone
+		generated again the way round it was (ZoneReset); WearNTear.Destroy with [LocationObjects], to
+		tell a piece it put back that fell for lack of support (Regrowth.OnFell).
 	*/
 	[BepInPlugin(GUID, PluginName, PluginVersion)]
 	public class RegrowthPlugin : BaseUnityPlugin
 	{
 		public const string GUID = "sarkasticeu.resource_regrowth";
 		public const string PluginName = "Sarkastic.gg Resource Regrowth";
-		public const string PluginVersion = "0.8.8";
+		public const string PluginVersion = "0.8.9";
 
 		internal static ManualLogSource Log;
-		// Whether ZoneSystem.SpawnLocation is patched for zone resets (only at startup, with Zones on).
-		internal static bool SpawnLocationPatched;
+		// Whether ZoneSystem.SpawnLocation is patched for zone resets (only at startup, with Zones on), or failed to be.
+		internal static bool SpawnLocationPatched, SpawnLocationPatchFailed;
+		// Whether WearNTear.Destroy is patched to tell fallen pieces (only at startup, with LocationObjects on), or failed to be.
+		internal static bool DestroyPatched, DestroyPatchFailed;
 
 		private Settings settings;
 		private Regrowth regrowth;
@@ -30,8 +33,28 @@ namespace ResourceRegrowth
 			settings = new Settings(Config);
 			if (settings.ZonesEnabled.Value)
 			{
-				new HarmonyLib.Harmony(GUID).CreateClassProcessor(typeof(ZoneSystem_SpawnLocation_Patch)).Patch();
-				SpawnLocationPatched = true;
+				SpawnLocationPatched = Patch(typeof(ZoneSystem_SpawnLocation_Patch), "ZoneSystem.SpawnLocation");
+				SpawnLocationPatchFailed = !SpawnLocationPatched;
+			}
+			if (settings.LocationObjectsEnabled.Value)
+			{
+				DestroyPatched = Patch(typeof(WearNTear_Destroy_Patch), "WearNTear.Destroy");
+				DestroyPatchFailed = !DestroyPatched;
+			}
+		}
+
+		// A game update that changes a patched method stops only the part that needs it (see Regrowth.Start).
+		private static bool Patch(System.Type patch, string method)
+		{
+			try
+			{
+				new HarmonyLib.Harmony(GUID).CreateClassProcessor(patch).Patch();
+				return true;
+			}
+			catch (System.Exception e)
+			{
+				Log.LogError($"Could not patch {method}: {e}");
+				return false;
 			}
 		}
 

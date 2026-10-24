@@ -9,7 +9,8 @@ namespace ResourceRegrowth
 	/*
 		What the plugin remembers between restarts, in a text file next to the world save:
 		- when a player was last near each zone;
-		- since when each depleted object has been seen depleted.
+		- since when each depleted object has been seen depleted;
+		- which location pieces it put back fell for lack of support (not put back again before they stand once more).
 
 		Times are real time in UTC. Both clocks start at the plugin's first run on a world, so
 		nothing regrows until IdleHours / AfterHours have passed since installing it -- the plugin
@@ -26,6 +27,8 @@ namespace ResourceRegrowth
 		private readonly Dictionary<Vector2s, DateTime> visited = new Dictionary<Vector2s, DateTime>();
 		// Zone reset: a location's rotation to give it again when its zone is next generated.
 		private readonly Dictionary<Vector2s, KeyValuePair<int, Quaternion>> keepRotation = new Dictionary<Vector2s, KeyValuePair<int, Quaternion>>();
+		// Location objects: slots whose piece, once put back, fell for lack of support, and when.
+		private readonly Dictionary<string, DateTime> fell = new Dictionary<string, DateTime>();
 
 		public DateTime? ZonesFirstRun { get; set; }
 		/*
@@ -88,6 +91,9 @@ namespace ResourceRegrowth
 								new Quaternion(float.Parse(f[4], CultureInfo.InvariantCulture), float.Parse(f[5], CultureInfo.InvariantCulture),
 									float.Parse(f[6], CultureInfo.InvariantCulture), float.Parse(f[7], CultureInfo.InvariantCulture)));
 							break;
+						case "fell":
+							fell[f[1]] = Parse(f[2]);
+							break;
 					}
 				}
 				catch (Exception)
@@ -137,6 +143,13 @@ namespace ResourceRegrowth
 					visited[zone] = now;
 				}
 			}
+			foreach (string key in new List<string>(fell.Keys))
+			{
+				if (fell[key] > now)
+				{
+					fell[key] = now;
+				}
+			}
 		}
 
 		public void Save()
@@ -167,6 +180,10 @@ namespace ResourceRegrowth
 			{
 				Quaternion q = entry.Value.Value;
 				lines.Add(string.Format(CultureInfo.InvariantCulture, "keeprotation {0} {1} {2} {3:R} {4:R} {5:R} {6:R}", entry.Key.x, entry.Key.y, entry.Value.Key, q.x, q.y, q.z, q.w));
+			}
+			foreach (KeyValuePair<string, DateTime> entry in fell)
+			{
+				lines.Add($"fell {entry.Key} {Format(entry.Value)}");
 			}
 			string temp = path + ".tmp";
 			File.WriteAllLines(temp, lines);
@@ -246,6 +263,20 @@ namespace ResourceRegrowth
 			return depletedSince.ContainsKey(key);
 		}
 
+		// Returns false when the slot was marked already.
+		public bool MarkFell(string key, DateTime now)
+		{
+			if (fell.ContainsKey(key))
+			{
+				return false;
+			}
+			fell[key] = now;
+			return true;
+		}
+
+		public bool Fell(string key, out DateTime when) => fell.TryGetValue(key, out when);
+		public bool ForgetFell(string key) => fell.Remove(key);
+
 		// A zone last seen before the cutoff counts as idle either way (LastSeen falls back to FirstRun, earlier still).
 		public void ForgetZonesSeenBefore(DateTime cutoff)
 		{
@@ -273,6 +304,8 @@ namespace ResourceRegrowth
 			{
 				depletedSince.Remove(key);
 			}
+			// Not the fell marks: a slot missing from one pass (location objects off, a layout that did not load) would
+			// lose its mark, and the piece would be put back to fall again. Only one the game made standing there clears it.
 		}
 
 		private static DateTime Parse(string s)

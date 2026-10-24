@@ -27,7 +27,7 @@ namespace ResourceRegrowth
 
 		A location's rotation is not reproducible from the world seed: the game draws it from an unseeded
 		random number (ZoneSystem.PlaceLocations). The proxy keeps it, so it is read before and given back
-		to ZoneSystem.SpawnLocation -- the one game method this plugin patches, only with Zones on --
+		to ZoneSystem.SpawnLocation -- patched for this, only with Zones on --
 		rounded to the game's 22.5-degree step (the save truncates Euler angles to half a degree, and a
 		dungeon's seed follows its generator's position to the metre). Tested: every location back at the
 		same rotation and position, every dungeon with the same rooms.
@@ -878,13 +878,10 @@ namespace ResourceRegrowth
 			The game turns a location only about the vertical, in steps of 22.5 degrees (PlaceLocations:
 			Random.Range(0, 16) * 22.5, or the slope's direction rounded to 22.5). The proxy's saved
 			rotation can be half a degree off that step (Euler angles truncated to 0.5 on save), and the
-			dungeon's seed follows its generator's position to the metre, so the step is taken.
+			dungeon's seed follows its generator's position to the metre, so the step is taken
+			(LocationObjects.PlacedRotation, which places the location objects the same way).
 		*/
-		private static Quaternion PlacedRotation(ZDO proxy)
-		{
-			float yaw = proxy.GetRotation().eulerAngles.y;
-			return Quaternion.Euler(0f, Mathf.Round(yaw / 22.5f) * 22.5f, 0f);
-		}
+		private static Quaternion PlacedRotation(ZDO proxy) => LocationObjects.PlacedRotation(proxy);
 
 		private string Kinds(IEnumerable<ZDO> zdos)
 		{

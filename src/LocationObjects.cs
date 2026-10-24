@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using SoftReferenceableAssets;
@@ -37,6 +38,10 @@ namespace ResourceRegrowth
 			public Vector3 position;
 			public Quaternion rotation;
 			public string source;
+			// The state's key (Key): made once here, not for every slot in every pass.
+			public string key;
+			// The game puts it on the ground after placing it (SnapToGround): only its x and z are the layout's.
+			public bool snaps;
 			// Building pieces of the same location or room that stood under or beside it: a hive hangs
 			// under a roof, and with the house pulled down it would hang in the air. Empty when nothing
 			// networked held it (a cave's rock is part of the location and cannot be removed).
@@ -49,6 +54,7 @@ namespace ResourceRegrowth
 			public Vector3 local;
 			public Quaternion rotation;
 			public bool random;
+			public bool snaps;
 			public List<ZNetView> supports;
 		}
 
@@ -262,6 +268,30 @@ namespace ResourceRegrowth
 			return slots.Values.SelectMany(list => list);
 		}
 
+		// The state's key of a slot: its prefab and spot. Slots of one prefab on one spot share it, and their clock.
+		public static string Key(string prefabName, Vector3 position)
+		{
+			return string.Format(CultureInfo.InvariantCulture, "LocationObject:{0}:{1:0.0}:{2:0.0}:{3:0.0}", prefabName.Replace(' ', '_'), position.x, position.y, position.z);
+		}
+
+		/*
+			The rotation the game gave a location: a whole number of 22.5-degree steps about y
+			(ZoneSystem.PlaceLocations, also the slope-facing ones). The proxy keeps it only to the half degree
+			once the world was saved -- ZDO.Save writes Euler angles doubled and truncated (WriteSmallRotation),
+			and 225 degrees, read back from the quaternion a hair under, is saved as 224.5 -- which at 40 m from the
+			location's centre is 0.35 m. On the live world of 23 Oct 2026, 113 of 1773 proxies were at 224.5, the
+			rest on the step. One the game did not place so (another mod's: tilted, or more than a degree off a
+			step) is taken as saved.
+		*/
+		public static Quaternion PlacedRotation(ZDO proxy)
+		{
+			Quaternion saved = proxy.GetRotation();
+			Vector3 e = saved.eulerAngles;
+			float step = Mathf.Round(e.y / 22.5f) * 22.5f;
+			bool placed = Mathf.Abs(Mathf.DeltaAngle(e.y, step)) <= 1f && Mathf.Abs(Mathf.DeltaAngle(e.x, 0f)) <= 1f && Mathf.Abs(Mathf.DeltaAngle(e.z, 0f)) <= 1f;
+			return placed ? Quaternion.Euler(0f, step, 0f) : saved;
+		}
+
 		private static string ProxyKey(ZDO proxy, int location)
 		{
 			Vector3 p = proxy.GetPosition();
@@ -303,6 +333,8 @@ namespace ResourceRegrowth
 						local = at,
 						rotation = view.gameObject.transform.rotation,
 						random = view.GetComponentInParent<RandomSpawn>(true) != null || view.GetComponentInParent<RandomObject>(true) != null,
+						// SnapToGround.SnappAll moves the object itself, after a location or a dungeon's rooms are placed.
+						snaps = view.GetComponent<SnapToGround>() != null,
 						// Not another object put back here: two fire pits side by side, both broken, would each wait for the other forever.
 						supports = views.Where(other => other != view && Holds(other.gameObject)
 							&& !wanted.Contains(Utils.GetPrefabName(other.gameObject).GetStableHashCode())
@@ -341,7 +373,7 @@ namespace ResourceRegrowth
 				foreach (ZDO proxy in proxies)
 				{
 					Vector3 position = proxy.GetPosition();
-					Quaternion rotation = proxy.GetRotation();
+					Quaternion rotation = PlacedRotation(proxy);
 					bool[] spawned = new bool[templates.Count];
 					List<ZNetView>[] supportsSpawned = new List<ZNetView>[templates.Count];
 					try
@@ -378,12 +410,16 @@ namespace ResourceRegrowth
 					{
 						if (spawned[i])
 						{
+							string prefabName = Utils.GetPrefabName(templates[i].view.gameObject);
+							Vector3 at = position + rotation * templates[i].local;
 							list.Add(new Slot
 							{
-								prefab = Utils.GetPrefabName(templates[i].view.gameObject).GetStableHashCode(),
-								position = position + rotation * templates[i].local,
+								prefab = prefabName.GetStableHashCode(),
+								position = at,
 								rotation = rotation * templates[i].rotation,
 								source = name,
+								key = Key(prefabName, at),
+								snaps = templates[i].snaps,
 								supports = supportsSpawned[i].Select(v => (Utils.GetPrefabName(v.gameObject).GetStableHashCode(), position + rotation * v.transform.position)).ToList(),
 							});
 						}
@@ -463,12 +499,16 @@ namespace ResourceRegrowth
 					{
 						if (spawned[i])
 						{
+							string prefabName = Utils.GetPrefabName(templates[i].view.gameObject);
+							Vector3 at = position + rotation * (inverse * (templates[i].local - origin));
 							list.Add(new Slot
 							{
-								prefab = Utils.GetPrefabName(templates[i].view.gameObject).GetStableHashCode(),
-								position = position + rotation * (inverse * (templates[i].local - origin)),
+								prefab = prefabName.GetStableHashCode(),
+								position = at,
 								rotation = rotation * (inverse * templates[i].rotation),
 								source = name,
+								key = Key(prefabName, at),
+								snaps = templates[i].snaps,
 								supports = supportsSpawned[i].Select(v => (Utils.GetPrefabName(v.gameObject).GetStableHashCode(), position + rotation * (inverse * (v.transform.position - origin)))).ToList(),
 							});
 						}

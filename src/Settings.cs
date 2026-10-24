@@ -105,7 +105,7 @@ namespace ResourceRegrowth
 			LocationObjectsAfterHours = config.Bind("LocationObjects", "AfterHours", 48f,
 				"Real hours after the plugin first saw the object missing.");
 			LocationObjectsPrefabs = config.Bind("LocationObjects", "Prefabs", "Beehive",
-				"Prefabs to put back. Only objects the world itself generated in a location or village room are ever recreated, never player-built ones. Comma separated. Needs a restart. A muddy scrap pile in a sunken crypt is `mudpile2`.");
+				"Prefabs to put back. Only objects the world itself generated in a location or village room are ever recreated, never player-built ones. Comma separated. Needs a restart. A muddy scrap pile in a sunken crypt is `mudpile2`. Building pieces of a camp or village (walls, poles, roofs) can go here too; one that falls for lack of support after being put back waits until its zone is generated again ([Zones]).");
 			LocationObjectsClearRemains = config.Bind("LocationObjects", "ClearRemains", true,
 				"When an object is put back, what is left of it goes: the fractured remains the game spawns when a pile or rock is hit (the prefab's name and \"_frac\") within 1.5 m of its place. Without this the pile would stand twice, once whole and once as the pieces still to mine.");
 

@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.8.9] - 2026-10-24
+
+### Added
+
+- `[LocationObjects]`: a piece put back that falls for lack of support (anything of the list the game treats as breakable,
+  `WearNTear`) is not put back again until one the game made stands in its place once more -- in practice when `[Zones]`
+  generates its zone again; from then on it is put back as before. Without this it came back every `AfterHours` and fell
+  at the next visit, its wood dropped each time. Seen through a second game patch, `WearNTear.Destroy`, applied only when
+  `[LocationObjects]` is on at the start, and only where the server runs the piece (Dedicated Simulation). The state file
+  keeps these as `fell` lines.
+- README, "Buildings of a camp or village": the walls, poles, roofs and stairs of Fuling villages, camps and stone towers
+  as location objects, with the 16 prefabs of Valheim 1.0.20 to list. Tested on a copy of the live world with them added
+  and the clocks run down: of 272 missing pieces 185 were put back, 83 waited near players' builds and 3 for a totem pole
+  that had held them; the 177 of them in zones the game then generated again stood where it puts its own, all within a
+  millimetre, none beside one standing. With a simulated player near a village, one of them (a hut's banner) fell, was
+  not put back again, and stood again when `[Zones]` generated the village.
+
+### Fixed
+
+- `[LocationObjects]`: a piece of the list counted as standing when any object of its kind stood within 1.5 m of its place
+  at any height, so of a stack of walls the one standing counted for those above and below it, and they were never put
+  back. A piece now counts only on its own place: within 10 cm, at the same height (one the game settles on the ground
+  after placing it, `SnapToGround`, at any height). Other objects keep the 1.5 m. On a copy of the live world with the
+  Fuling pieces listed, 0.8.8 found 100 of them missing, 0.8.9 finds 272.
+- `[LocationObjects]`: the places of a location's objects were worked out from its rotation as the world save keeps it,
+  up to half a degree short of the 22.5-degree step the game placed it at (`ZDO.Save` writes angles doubled and truncated:
+  225 degrees, read back from the rotation a hair under, is saved as 224.5) -- 0.1 m off at 11 m from the location's
+  centre, 0.35 m at 40 m. The rotation is now taken to its step, as the zone reset already did. 113 of the 1773 locations
+  of the live world were short, all of them placed at 225 degrees. In a test without this fix the 10 cm test above took
+  38 pieces standing in their places for missing: 8, walls of four stone tower ruins (`StoneTowerRuins03`), were put
+  back 0.1 m beside them, the others waited only because players' builds were near. The objects of those 113 locations
+  get new places, so the clocks of the ones missing there start again. A rotation more than a degree off a step (a
+  location another mod placed) is taken as saved.
+- After a game update that changed a patched method (`ZoneSystem.SpawnLocation`, `WearNTear.Destroy`), the plugin would
+  have warned that the part was switched on after the start, and a failed first patch skipped the second. Each patch is
+  now tried on its own; an error says which, and the warning that the part stays off says why.
+- `[LocationObjects]`: of more objects on one spot than the layout has, the one the game made stays and one put back
+  goes.
+
 ## [0.8.8] - 2026-10-18
 
 ### Fixed

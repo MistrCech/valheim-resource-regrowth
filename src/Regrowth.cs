@@ -1,3 +1,4 @@
+using HarmonyLib;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -40,7 +41,7 @@ namespace ResourceRegrowth
 
 		private class Tally
 		{
-			public int depleted, waiting, blocked, unsupported, inUse, regrown, logged, extra;
+			public int depleted, waiting, blocked, unsupported, fell, inUse, regrown, logged, extra;
 		}
 
 		// ZDO instances are pooled and reused after an object is destroyed, so a candidate keeps
@@ -55,6 +56,13 @@ namespace ResourceRegrowth
 
 		private const float PresenceIntervalSeconds = 10f;
 		private const int ScanBatch = 4096;
+
+		// The running regrowth with location objects on, for the WearNTear.Destroy patch.
+		internal static Regrowth Active;
+		// On a building piece it put back: when (UTC ticks). A piece that falls with it is told from one that stood there all along.
+		internal static readonly int PutBackHash = (RegrowthPlugin.GUID + ".putback").GetStableHashCode();
+		// On it too: its slot's state key. A piece that snaps to the ground no longer stands at its slot's height.
+		internal static readonly int SlotKeyHash = (RegrowthPlugin.GUID + ".slot").GetStableHashCode();
 
 		private readonly MonoBehaviour host;
 		private readonly Settings settings;
@@ -100,6 +108,16 @@ namespace ResourceRegrowth
 				// Older versions kept a zone's presence for IdleHours only.
 				state.PresenceKnownSince = now.AddHours(-Math.Max(0f, settings.IdleHours.Value));
 			}
+			if (locationObjects != null)
+			{
+				Active = this;
+				if (!RegrowthPlugin.DestroyPatched)
+				{
+					RegrowthPlugin.Log.LogWarning(RegrowthPlugin.DestroyPatchFailed
+						? "LocationObjects: WearNTear.Destroy could not be patched at startup (see the error above); a piece put back that falls is put back again."
+						: "LocationObjects: switched on after the server started; until a restart a piece put back that falls is put back again (the game method that tells is patched at startup only).");
+				}
+			}
 			if (settings.ZonesEnabled.Value)
 			{
 				if (RegrowthPlugin.SpawnLocationPatched)
@@ -108,7 +126,9 @@ namespace ResourceRegrowth
 				}
 				else
 				{
-					RegrowthPlugin.Log.LogWarning("Zones: switched on after the server started; they need a restart (the game method that keeps a location's rotation is patched at startup only).");
+					RegrowthPlugin.Log.LogWarning(RegrowthPlugin.SpawnLocationPatchFailed
+						? "Zones: ZoneSystem.SpawnLocation could not be patched at startup (see the error above); no zone is generated again."
+						: "Zones: switched on after the server started; they need a restart (the game method that keeps a location's rotation is patched at startup only).");
 				}
 			}
 			passTimer = 60f;
@@ -127,6 +147,10 @@ namespace ResourceRegrowth
 				running = null;
 			}
 			zones?.Stop();
+			if (Active == this)
+			{
+				Active = null;
+			}
 			SaveState();
 		}
 
@@ -311,7 +335,8 @@ namespace ResourceRegrowth
 				Dictionary<Vector2s, List<Terrain.Protector>> protectors = new Dictionary<Vector2s, List<Terrain.Protector>>();
 				List<Candidate> candidates = new List<Candidate>();
 				List<ZDO> sources = new List<ZDO>();
-				Dictionary<Vector2s, List<ZDO>> standing = new Dictionary<Vector2s, List<ZDO>>();
+				// Wanted objects standing, by zone and prefab: a village's slots are hundreds of pieces among hundreds of others.
+				Dictionary<(Vector2s, int), List<ZDO>> standing = new Dictionary<(Vector2s, int), List<ZDO>>();
 				// Fractured remains of wanted objects (a hit pile or rock leaves "<name>_frac"), by zone.
 				Dictionary<Vector2s, List<ZDO>> remains = new Dictionary<Vector2s, List<ZDO>>();
 				// What the world generated that can hold a location object up (LocationObjects.Holds, no creator), by zone.
@@ -391,10 +416,10 @@ namespace ResourceRegrowth
 					// one never counted as standing, so every place of it looked empty and got one more each time its hours were up.
 					if (locationObjects != null && locationObjects.IsWanted(prefab))
 					{
-						Vector2s zone = ZoneSystem.GetZone(zdo.GetPosition());
-						if (!standing.TryGetValue(zone, out List<ZDO> list))
+						(Vector2s, int) at = (ZoneSystem.GetZone(zdo.GetPosition()), prefab);
+						if (!standing.TryGetValue(at, out List<ZDO> list))
 						{
-							standing[zone] = list = new List<ZDO>();
+							standing[at] = list = new List<ZDO>();
 						}
 						list.Add(zdo);
 					}
@@ -555,7 +580,8 @@ namespace ResourceRegrowth
 						t.Key == Kind.Terrain
 							? $"terrain zones {t.Value.depleted} modified ({t.Value.waiting} waiting, {t.Value.blocked} all protected, {t.Value.inUse} in use, {t.Value.regrown} {(dryRun ? "would step" : "stepped")})"
 							: t.Key == Kind.LocationObject
-							? $"location objects {t.Value.depleted} missing ({t.Value.waiting} waiting, {t.Value.blocked} near player builds, {t.Value.unsupported} with what held them gone, {t.Value.inUse} in use, "
+							? $"location objects {t.Value.depleted} missing ({t.Value.waiting} waiting, {t.Value.blocked} near player builds, {t.Value.unsupported} with what held them gone, "
+								+ $"{(t.Value.fell > 0 ? $"{t.Value.fell} fell after being put back, " : "")}{t.Value.inUse} in use, "
 								+ $"{t.Value.regrown} {(dryRun ? "would put back" : "put back")}{(t.Value.extra > 0 ? $", {t.Value.extra} extra {(dryRun ? "would go" : "gone")}" : "")})"
 							: $"{Describe(t.Key)}s {t.Value.depleted} depleted ({t.Value.waiting} waiting, {t.Value.blocked} near player builds, {t.Value.inUse} in use, "
 							+ $"{t.Value.regrown} {(dryRun ? "would regrow" : "regrown")})"))
@@ -983,23 +1009,33 @@ namespace ResourceRegrowth
 
 		/*
 			A location object is missing when nothing of its prefab stands within SlotTolerance
-			(horizontally) of where the game put it. "In use" is its zone being loaded on the server: an
-			object created there now would appear in front of whoever is near.
+			(horizontally) of where the game put it -- a building piece (what can hold another up,
+			LocationObjects.Holds) only on its very spot, within PieceTolerance. Pieces never move, and in a
+			village they stand close: GoblinCamp2 on the live world (23 Oct 2026) has 215 pairs of one kind
+			within 1.5 m among its 293 walls, poles and roofs, the nearest 0.2 m apart, so one wall standing
+			hid its missing neighbours. Its height counts too (walls stand stacked 1 m apart), except for a
+			piece the game puts on the ground after placing it (SnapToGround): the log benches around the
+			village's campfire stand 0.11-0.19 m off their layout's height, and a test of that height put a
+			second one beside each. "In use" is its zone being loaded on the server: an object created there
+			now would appear in front of whoever is near.
 		*/
 		private const float SlotTolerance = 1.5f;
+		private const float PieceTolerance = 0.1f;
 
 		private void DecideSlot(LocationObjects.Slot slot, DateTime now, bool dryRun, Dictionary<Vector2s, List<Vector3>> blockers,
-			Dictionary<Vector2s, List<ZDO>> standing, Dictionary<Vector2s, List<ZDO>> remains, Dictionary<Vector2s, List<ZDO>> worldPieces,
+			Dictionary<(Vector2s, int), List<ZDO>> standing, Dictionary<Vector2s, List<ZDO>> remains, Dictionary<Vector2s, List<ZDO>> worldPieces,
 			Tally tally, HashSet<string> stillDepleted, HashSet<string> regrown)
 		{
 			Vector2s zone = ZoneSystem.GetZone(slot.position);
+			bool piece = holderPrefabs.Contains(slot.prefab);
 			bool stands = false;
+			bool original = false;
 			List<ZDO> onSpot = null;
 			for (int dy = -1; dy <= 1; dy++)
 			{
 				for (int dx = -1; dx <= 1; dx++)
 				{
-					if (!standing.TryGetValue(new Vector2s(zone.x + dx, zone.y + dy), out List<ZDO> list))
+					if (!standing.TryGetValue((new Vector2s(zone.x + dx, zone.y + dy), slot.prefab), out List<ZDO> list))
 					{
 						continue;
 					}
@@ -1008,9 +1044,16 @@ namespace ResourceRegrowth
 						Vector3 p = zdo.GetPosition();
 						float x = p.x - slot.position.x;
 						float z = p.z - slot.position.z;
-						if (zdo.GetPrefab() == slot.prefab && x * x + z * z <= SlotTolerance * SlotTolerance)
+						bool here = piece
+							? x * x + z * z <= PieceTolerance * PieceTolerance && (slot.snaps || Mathf.Abs(p.y - slot.position.y) <= PieceTolerance)
+							: x * x + z * z <= SlotTolerance * SlotTolerance;
+						// Collected over many frames: what fell since is gone, and its ZDO may be another object's by now.
+						// What fell this frame is still known until the destroy list goes out at the end of it.
+						if (here && zdo.GetPrefab() == slot.prefab && ZDOMan.instance.GetZDO(zdo.m_uid) == zdo
+							&& !ZDOMan.instance.m_destroySendList.Contains(zdo.m_uid))
 						{
 							stands = true;
+							original |= zdo.GetLong(PutBackHash) == 0L;
 							if ((p - slot.position).sqrMagnitude <= SameSpot * SameSpot && !extraGone.Contains(zdo.m_uid))
 							{
 								if (onSpot == null)
@@ -1023,8 +1066,16 @@ namespace ResourceRegrowth
 					}
 				}
 			}
+			string key = slot.key;
 			if (stands)
 			{
+				// One the game made stands again (its zone was generated again): from now on it is put back as before.
+				// A put-back twin of another slot on the same spot does not count.
+				if (original && state.ForgetFell(key))
+				{
+					RegrowthPlugin.Log.LogInfo($"{Name(slot.prefab)} of {slot.source} at {slot.position.x:0},{slot.position.y:0},{slot.position.z:0}, which fell after being put back, stands in its place again; "
+						+ "it is put back as before from now on.");
+				}
 				if (onSpot != null && onSpot.Count > 1)
 				{
 					RemoveExtra(slot, onSpot, dryRun, blockers, tally);
@@ -1032,9 +1083,12 @@ namespace ResourceRegrowth
 				return;
 			}
 			tally.depleted++;
-			string key = string.Format(CultureInfo.InvariantCulture, "{0}:{1}:{2:0.0}:{3:0.0}:{4:0.0}",
-				Kind.LocationObject, Name(slot.prefab).Replace(' ', '_'), slot.position.x, slot.position.y, slot.position.z);
 			stillDepleted.Add(key);
+			if (state.Fell(key, out DateTime _))
+			{
+				tally.fell++;
+				return;
+			}
 			double depleted = Hours(state.DepletedSince(key, now), now);
 			double idle = Hours(state.LastSeen(zone), now);
 			if (depleted < settings.LocationObjectsAfterHours.Value || idle < settings.IdleHours.Value)
@@ -1080,8 +1134,41 @@ namespace ResourceRegrowth
 					ZDOMan.instance.DestroyZDO(remainder);
 					remainsGone.Add(remainder.m_uid);
 				}
-				LocationObjects.Create(slot.prefab, slot.position, slot.rotation);
+				ZDO made = LocationObjects.Create(slot.prefab, slot.position, slot.rotation);
+				if (piece)
+				{
+					made.Set(PutBackHash, now.Ticks);
+					made.Set(SlotKeyHash, key);
+				}
 				regrown.Add(key);
+			}
+		}
+
+		/*
+			A building piece put back that fell for lack of support (WearNTear_Destroy_Patch) is not put
+			back again until its slot has had a piece standing on it once more -- in practice when [Zones]
+			generates its zone again, location and all. Otherwise it would come back every AfterHours and
+			fall at the next visit, its wood dropped each time: on a copy of the live world (23 Oct 2026)
+			3 of the 14 pieces put back in GoblinCamp2, a banner and two walls of its watchtower 38-41 m
+			up, fell within 90 s of a player coming near.
+		*/
+		internal void OnFell(ZDO zdo)
+		{
+			int prefab = zdo.GetPrefab();
+			string key = zdo.GetString(SlotKeyHash);
+			if (locationObjects == null || !locationObjects.IsWanted(prefab) || string.IsNullOrEmpty(key))
+			{
+				return;
+			}
+			Vector3 p = zdo.GetPosition();
+			DateTime now = Now();
+			if (state.MarkFell(key, now))
+			{
+				DateTime putBack = new DateTime(zdo.GetLong(PutBackHash), DateTimeKind.Utc);
+				RegrowthPlugin.Log.LogInfo($"{Name(prefab)} at {p.x:0},{p.y:0},{p.z:0}, put back {Hours(putBack, now):0.##} h ago, fell for lack of support: "
+					+ "not put back again before something stands in its place once more (its zone generated again).");
+				// At once, not at the end of the pass: the world may be saved without the piece before a crash.
+				SaveState();
 			}
 		}
 
@@ -1112,7 +1199,9 @@ namespace ResourceRegrowth
 				return;
 			}
 			// Collected over many frames: an object destroyed since may have been reused for another.
-			List<ZDO> extra = onSpot.Where(zdo => ZDOMan.instance.GetZDO(zdo.m_uid) == zdo).OrderBy(zdo => zdo.GetBool(ZDOVars.s_picked)).Skip(slotsThere).ToList();
+			// What stays: not picked, and one the game made before one put back.
+			List<ZDO> extra = onSpot.Where(zdo => ZDOMan.instance.GetZDO(zdo.m_uid) == zdo).OrderBy(zdo => zdo.GetBool(ZDOVars.s_picked))
+				.ThenBy(zdo => zdo.GetLong(PutBackHash) != 0L).Skip(slotsThere).ToList();
 			if (extra.Count == 0)
 			{
 				return;
@@ -1320,5 +1409,45 @@ namespace ResourceRegrowth
 		}
 
 		private const float InteriorHeight = 2500f;
+	}
+
+	/*
+		A building piece the plugin put back that falls for lack of support (Regrowth.OnFell): the game
+		destroys it from WearNTear.UpdateWear, with no hit, once UpdateSupport found too little. Only where
+		the server runs the piece: with Dedicated Simulation it owns what stands near players; in vanilla a
+		player's game does, and the fall never passes through here. ApplyDamage writes the health (0 or
+		less) before it calls Destroy; a player's hammer (RPC_Remove) calls it with the health as it was, so
+		a piece taken down that way -- standing unsupported only with NoBuildingFall -- is no fall.
+	*/
+	[HarmonyPatch(typeof(WearNTear), "Destroy", typeof(HitData), typeof(bool))]
+	internal static class WearNTear_Destroy_Patch
+	{
+		private static bool failed;
+
+		static void Prefix(WearNTear __instance, HitData hitData)
+		{
+			if (Regrowth.Active == null || hitData != null || !__instance.m_noSupportWear || !__instance.m_nview || !__instance.m_nview.IsValid()
+				|| __instance.HaveSupport())
+			{
+				return;
+			}
+			try
+			{
+				ZDO zdo = __instance.m_nview.GetZDO();
+				if (zdo.GetLong(Regrowth.PutBackHash) != 0L && zdo.GetFloat(ZDOVars.s_health, __instance.m_health) <= 0f)
+				{
+					Regrowth.Active.OnFell(zdo);
+				}
+			}
+			catch (Exception e)
+			{
+				// The game's own destroy must go on whatever happens here.
+				if (!failed)
+				{
+					failed = true;
+					RegrowthPlugin.Log.LogWarning($"Could not note a fallen piece: {e}");
+				}
+			}
+		}
 	}
 }
