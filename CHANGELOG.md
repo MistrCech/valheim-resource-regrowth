@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.10] - 2026-10-24
+
+### Fixed
+
+- `[Zones]`: each object the game makes again takes the place of the old one of its prefab standing there (within half a
+  metre, 2 m up or down); it took the first one found within that reach, not the nearest. In a stack of the same piece,
+  a stone tower's walls one above another or a guard tower's poles, the first one found could be the one above or below,
+  and the old piece it was taken for was left standing beside its new copy, kept as "maybe a neighbour's". The pairs are
+  now made nearest first. It happened where the old objects were not in the order the game makes them, as where
+  `[LocationObjects]` has put pieces back (they go to the end of their zone's list): on a copy of the live world with the
+  Fuling pieces of 0.8.9 put back, generating again the 10 zones they were in left 40 old pieces beside their copies with
+  0.8.9 -- 39 stone walls in four stone towers and a pole of a Fuling guard tower -- and none with 0.8.10; the two worlds
+  differ in those 40 objects and nothing else. A piece listed in `[LocationObjects]` was removed as an extra at its next
+  pass; anything else stayed.
+
 ## [0.8.9] - 2026-10-24
 
 ### Added

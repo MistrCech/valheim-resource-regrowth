@@ -18,7 +18,8 @@ namespace ResourceRegrowth
 
 		Nothing is deleted before the zone is generated again: ghost generation only sees colliders, and
 		the objects of a zone nobody is near have none. Every object the game makes then takes the place
-		of the old one of its prefab standing there (within half a metre), in the zone or over its edge --
+		of the old one of its prefab standing there (within half a metre, the nearest pairs first, so a
+		stack of the same piece is matched one by one), in the zone or over its edge --
 		a location or dungeon reaching into the next zone, a cave whose interior lies next to another
 		dungeon's, are matched object by object, not guessed. What is left over goes only when it is
 		something the zone itself or life and felling there made: vegetation, stumps and logs, fractured
@@ -960,18 +961,20 @@ namespace ResourceRegrowth
 		/*
 			Each object made now replaces the old one of its prefab standing in its place, in this zone or a
 			neighbouring one (a deleted object stays in its sector until the deletions go out at the end of
-			the frame, so `gone` keeps track). Where the old one holds a player's things, or is in use
-			beyond the zone's edge, the new one goes instead. Returns how many replaced; `beyond`: of them outside
-			the zone; `refused`: new ones removed again.
+			the frame, so `gone` keeps track). Nearest pairs first: in a stack of the same piece (a tower's
+			poles one above another) the first old one within reach may be the one above, and the one it was
+			taken for would be left standing beside its new copy. Where the old one holds a player's things,
+			or is in use beyond the zone's edge, the new one goes instead. Returns how many replaced; `beyond`:
+			of them outside the zone; `refused`: new ones removed again.
 		*/
 		private int Replace(Vector2s zone, List<ZDO> made, List<ZDO> old, HashSet<ZDO> gone, out int beyond, out int refused)
 		{
 			beyond = 0;
 			refused = 0;
 			HashSet<ZDO> fresh = new HashSet<ZDO>(made);
-			Dictionary<Vector2s, List<ZDO>> sectors = new Dictionary<Vector2s, List<ZDO>>();
-			long server = ZDOMan.GetSessionID();
-			int replaced = 0;
+			// The old objects of each sector by prefab.
+			Dictionary<Vector2s, Dictionary<int, List<ZDO>>> sectors = new Dictionary<Vector2s, Dictionary<int, List<ZDO>>>();
+			List<(float distance, ZDO made, ZDO old, bool here)> pairs = new List<(float, ZDO, ZDO, bool)>();
 			foreach (ZDO zdo in made)
 			{
 				if (gone.Contains(zdo))
@@ -981,49 +984,71 @@ namespace ResourceRegrowth
 				Vector3 p = zdo.GetPosition();
 				Vector2s at = ZoneSystem.GetZone(p);
 				bool here = at.x == zone.x && at.y == zone.y;
-				if (!sectors.TryGetValue(at, out List<ZDO> there))
+				if (!sectors.TryGetValue(at, out Dictionary<int, List<ZDO>> there))
 				{
-					if (here)
+					List<ZDO> objects = old;
+					if (!here)
 					{
-						there = old;
+						objects = new List<ZDO>();
+						ZDOMan.instance.FindSectorObjects(at, new SimulationDistance(0, 0), objects);
 					}
-					else
+					there = new Dictionary<int, List<ZDO>>();
+					foreach (ZDO candidate in objects)
 					{
-						there = new List<ZDO>();
-						ZDOMan.instance.FindSectorObjects(at, new SimulationDistance(0, 0), there);
+						if (gone.Contains(candidate) || fresh.Contains(candidate) || !candidate.IsValid())
+						{
+							continue;
+						}
+						if (!there.TryGetValue(candidate.GetPrefab(), out List<ZDO> list))
+						{
+							there[candidate.GetPrefab()] = list = new List<ZDO>();
+						}
+						list.Add(candidate);
 					}
 					sectors[at] = there;
 				}
-				int prefab = zdo.GetPrefab();
-				bool inside = p.y > 3000f;
-				foreach (ZDO candidate in there)
+				if (!there.TryGetValue(zdo.GetPrefab(), out List<ZDO> same))
 				{
-					if (gone.Contains(candidate) || fresh.Contains(candidate) || candidate.GetPrefab() != prefab || !candidate.IsValid())
-					{
-						continue;
-					}
+					continue;
+				}
+				bool inside = p.y > 3000f;
+				foreach (ZDO candidate in same)
+				{
 					Vector3 q = candidate.GetPosition();
 					float x = q.x - p.x, z = q.z - p.z, y = q.y - p.y;
 					if (x * x + z * z > 0.25f || Mathf.Abs(y) > (inside ? 0.5f : 2f))
 					{
 						continue;
 					}
-					long owner = candidate.GetOwner();
-					if (IsPlayers(candidate, prefab, readContainers: true) || (!here && ((owner != 0L && owner != server && ZNet.instance.GetPeer(owner) != null)
-						|| ZNetScene.instance.FindInstance(candidate))))
-					{
-						// The old one must stay -- it holds a player's things, or is in use beyond the edge: the new one would stand next to it.
-						Delete(zdo, gone);
-						refused++;
-						break;
-					}
-					Delete(candidate, gone);
-					replaced++;
-					if (!here)
-					{
-						beyond++;
-					}
-					break;
+					pairs.Add((x * x + y * y + z * z, zdo, candidate, here));
+				}
+			}
+			long server = ZDOMan.GetSessionID();
+			HashSet<ZDO> paired = new HashSet<ZDO>();
+			int replaced = 0;
+			// OrderBy keeps the order of equal distances: the same pairs every time.
+			foreach ((float _, ZDO zdo, ZDO candidate, bool here) in pairs.OrderBy(pair => pair.distance))
+			{
+				if (paired.Contains(zdo) || paired.Contains(candidate))
+				{
+					continue;
+				}
+				paired.Add(zdo);
+				paired.Add(candidate);
+				long owner = candidate.GetOwner();
+				if (IsPlayers(candidate, candidate.GetPrefab(), readContainers: true) || (!here && ((owner != 0L && owner != server && ZNet.instance.GetPeer(owner) != null)
+					|| ZNetScene.instance.FindInstance(candidate))))
+				{
+					// The old one must stay -- it holds a player's things, or is in use beyond the edge: the new one would stand next to it.
+					Delete(zdo, gone);
+					refused++;
+					continue;
+				}
+				Delete(candidate, gone);
+				replaced++;
+				if (!here)
+				{
+					beyond++;
 				}
 			}
 			return replaced;

@@ -1,6 +1,6 @@
 # Sarkastic.gg Resource Regrowth
 
-![version: 0.8.9](https://img.shields.io/badge/version-0.8.9-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
+![version: 0.8.10](https://img.shields.io/badge/version-0.8.10-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
 
 [Source code](https://github.com/MistrCech/valheim-resource-regrowth)  ·  [Report a bug](https://github.com/MistrCech/valheim-resource-regrowth/issues/new)  ·  [Changelog](https://github.com/MistrCech/valheim-resource-regrowth/blob/main/CHANGELOG.md)  ·  [Dedicated Simulation](https://thunderstore.io/c/valheim/p/Sarkastic_gg/Dedicated_Simulation/)
 
@@ -178,7 +178,8 @@ players pulled down. With `[Zones] Enabled`, a zone (64 m square) that a player 
 is, once nobody has been near it (`PresenceRadiusZones`) for `IdleHours` (72), generated again by the
 game's own zone generation, the way Dedicated Simulation generates the zones around players
 (ZoneSystem.SpawnZone, ghost mode). Every object the game makes takes the place of the old one of its
-kind standing there, which goes; what is left over of what only the zone itself makes -- vegetation,
+kind standing there (the nearest, so of a stack of walls each takes its own), which goes; what is left
+over of what only the zone itself makes -- vegetation,
 stumps and logs, wild creatures, items lying about, the record of what was done to the ground -- goes
 too. So trees, rocks and ore deposits, bushes, pickables, the location with its buildings, chests,
 spawners and dungeon come back. Measured on a copy of a live world against a fresh world with the same
