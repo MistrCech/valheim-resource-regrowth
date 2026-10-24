@@ -199,14 +199,8 @@ namespace ResourceRegrowth
 				}
 				kinds[hash] = KindOf(prefab);
 			}
-			protectedNames = new HashSet<string>(settings.ZonesProtected.Value.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0));
-			foreach (ZoneSystem.ZoneLocation location in zs.m_locations)
-			{
-				if (location != null && location.m_enable && location.m_unique)
-				{
-					protectedNames.Add(location.m_prefabName);
-				}
-			}
+			protectedNames = new HashSet<string>();
+			ReadProtected(zs);
 			Active = this;
 			RegrowthPlugin.Log.LogInfo($"Zones{(settings.ZonesDryRun.Value || settings.DryRun.Value ? " (dry run: nothing will be changed)" : "")}: a zone players have been in is generated again after {settings.ZonesIdleHours.Value:0.#} h with nobody near, "
 				+ $"at most {settings.ZonesPerPass.Value} per pass, none in the first {settings.ZonesGraceMinutes.Value:0} minutes after a start; protected locations: {string.Join(", ", protectedNames.OrderBy(n => n, StringComparer.Ordinal))}. "
@@ -883,6 +877,34 @@ namespace ResourceRegrowth
 			(LocationObjects.PlacedRotation, which places the location objects the same way).
 		*/
 		private static Quaternion PlacedRotation(ZDO proxy) => LocationObjects.PlacedRotation(proxy);
+
+		// The ProtectedLocations value the names were read from.
+		private string protectedList;
+
+		// The config's ProtectedLocations and every location the game places only once.
+		private void ReadProtected(ZoneSystem zs)
+		{
+			protectedNames.Clear();
+			protectedNames.UnionWith(settings.ZonesProtected.Value.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0));
+			foreach (ZoneSystem.ZoneLocation location in zs.m_locations)
+			{
+				if (location != null && location.m_enable && location.m_unique)
+				{
+					protectedNames.Add(location.m_prefabName);
+				}
+			}
+			protectedList = settings.ZonesProtected.Value;
+		}
+
+		// The config is reloaded before every pass: a ProtectedLocations edited while the server runs counts from the next pass.
+		public void ReloadProtected()
+		{
+			if (protectedList != settings.ZonesProtected.Value && ZoneSystem.instance)
+			{
+				ReadProtected(ZoneSystem.instance);
+				RegrowthPlugin.Log.LogInfo($"Zones: protected locations read again from the config: {string.Join(", ", protectedNames.OrderBy(n => n, StringComparer.Ordinal))}.");
+			}
+		}
 
 		private string Kinds(IEnumerable<ZDO> zdos)
 		{

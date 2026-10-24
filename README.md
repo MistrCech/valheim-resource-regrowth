@@ -1,6 +1,6 @@
 # Sarkastic.gg Resource Regrowth
 
-![version: 0.8.10](https://img.shields.io/badge/version-0.8.10-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
+![version: 0.8.11](https://img.shields.io/badge/version-0.8.11-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
 
 [Source code](https://github.com/MistrCech/valheim-resource-regrowth)  ·  [Report a bug](https://github.com/MistrCech/valheim-resource-regrowth/issues/new)  ·  [Changelog](https://github.com/MistrCech/valheim-resource-regrowth/blob/main/CHANGELOG.md)  ·  [Dedicated Simulation](https://thunderstore.io/c/valheim/p/Sarkastic_gg/Dedicated_Simulation/)
 
@@ -284,9 +284,10 @@ Copy `SarkasticGG_Resource_Regrowth.dll` to `BepInEx/plugins/` on the server and
 That creates `BepInEx/config/sarkasticeu.resource_regrowth.cfg`.
 
 It starts in **dry run**: it only logs what it would regrow. Watch the log for a few passes, then
-set `DryRun = false`. The config file is re-read before every pass, so `DryRun`, the delays and
-the logging amount change without a restart; `Enabled`, the prefab lists and the exclusions are
-applied at startup.
+set `DryRun = false`. The config file is re-read before every pass, so `DryRun`, the delays, the
+logging amount, `[SurtlingCores] Prefabs`, the exclusions and `[Zones] ProtectedLocations` change
+without a restart (a list read again is said in the log); `Enabled`, the switches of the parts and
+`[LocationObjects] Prefabs` are applied at startup.
 
 ## Configuration
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.8.11] - 2026-10-24
+
+### Added
+
+- `[SurtlingCores] Prefabs`, `[TreasureChests] ExcludePrefabs`, `[DungeonMonsters] ExcludePrefabs` and `[Zones] ProtectedLocations`
+  are read again before every pass, like the rest of the config: a list edited while the server runs counts from the next
+  pass, and the log says so. `Enabled`, the switches of the parts and `[LocationObjects] Prefabs` still take a restart.
+
+### Fixed
+
+- `[LocationObjects]`: a location or room whose layout could not be read (an exception while replaying it) ended the pass,
+  and the next pass met it again, so nothing regrew until a restart. Such a layout is now skipped with a warning and its
+  objects are left alone; the pass goes on. Found by an audit of the code; it has not happened on a live server.
+- `[LocationObjects] ClearRemains`: the remains of a listed object were recognised only as `<name>_frac`. What the game says
+  the object turns into when it breaks (`Destructible`'s spawn-when-destroyed, when that is a world object and not an item
+  or an effect) counts too.
+
 ## [0.8.10] - 2026-10-24
 
 ### Fixed

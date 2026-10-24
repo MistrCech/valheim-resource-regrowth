@@ -171,6 +171,12 @@ namespace ResourceRegrowth
 				{
 					RegrowthPlugin.Log.LogInfo(settings.DryRun.Value ? "Dry run switched on: nothing will be changed." : "Dry run switched off: regrowth is live.");
 				}
+				if (prefabLists != PrefabLists())
+				{
+					BuildPrefabSets();
+					RegrowthPlugin.Log.LogInfo($"The config's lists were read again: {corePrefabs.Count} kind(s) of pickable ([SurtlingCores] Prefabs), {chestPrefabs.Count} kind(s) of chest, {spawnerPrefabs.Count} kind(s) of one-time spawner.");
+				}
+				zones?.ReloadProtected();
 				passTimer = Mathf.Max(1f, settings.CheckIntervalMinutes.Value) * 60f;
 				running = host.StartCoroutine(Pass());
 			}
@@ -204,8 +210,28 @@ namespace ResourceRegrowth
 			}
 		}
 
+		// The config values the prefab sets were built from; they are built again before a pass when these changed (the config is
+		// reloaded before every pass), so a list edited while the server runs counts from the next pass. [LocationObjects] Prefabs
+		// and the switches of the parts still take a restart.
+		private string prefabLists;
+
+		private string PrefabLists()
+		{
+			return settings.CorePrefabs.Value + "|" + settings.ChestsExclude.Value + "|" + settings.SpawnersExclude.Value;
+		}
+
 		private void BuildPrefabSets()
 		{
+			corePrefabs.Clear();
+			coreHours.Clear();
+			chestPrefabs.Clear();
+			spawnerPrefabs.Clear();
+			generatorPrefabs.Clear();
+			piecePrefabs.Clear();
+			holderPrefabs.Clear();
+			tombstonePrefabs.Clear();
+			prefabNames.Clear();
+			prefabLists = PrefabLists();
 			// "name" or "name:hours" -- a prefab with its own hours instead of AfterHours.
 			Dictionary<string, float> cores = new Dictionary<string, float>();
 			foreach (string entry in SplitList(settings.CorePrefabs.Value))

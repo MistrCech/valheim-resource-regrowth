@@ -79,6 +79,18 @@ namespace ResourceRegrowth
 			List<string> names = prefabNames.ToList();
 			wanted = new HashSet<int>(names.Select(n => n.GetStableHashCode()));
 			remains = new HashSet<int>(names.Select(n => (n + "_frac").GetStableHashCode()));
+			// What a wanted object turns into when it breaks (a mud pile into its fractured pile) counts as its remains too; not an item it
+			// drops or an effect it plays.
+			foreach (string name in names)
+			{
+				GameObject prefab = ZNetScene.instance.GetPrefab(name);
+				Destructible destructible = prefab ? prefab.GetComponent<Destructible>() : null;
+				GameObject left = destructible ? destructible.m_spawnWhenDestroyed : null;
+				if (left && left.GetComponent<ZNetView>() && !left.GetComponent<ItemDrop>())
+				{
+					remains.Add(left.name.GetStableHashCode());
+				}
+			}
 			proxyPrefab = ZoneSystem.instance.m_locationProxyPrefab.name.GetStableHashCode();
 			foreach (GameObject prefab in ZNetScene.instance.m_prefabs)
 			{
@@ -211,6 +223,12 @@ namespace ResourceRegrowth
 						onLoaded(1);
 					}
 				}
+				catch (Exception e)
+				{
+					// One layout that cannot be read must not end this pass, and the next, and every one after: its objects are left alone.
+					locationHasSlots[entry.Key] = false;
+					RegrowthPlugin.Log.LogWarning($"LocationObjects: the layout of {location.m_prefabName} could not be read; its objects are not put back: {e}");
+				}
 				finally
 				{
 					location.m_prefab.Release();
@@ -238,6 +256,11 @@ namespace ResourceRegrowth
 						ReplayRooms(entry.Key, room, entry.Value);
 						onLoaded(1);
 					}
+				}
+				catch (Exception e)
+				{
+					roomHasSlots[entry.Key] = false;
+					RegrowthPlugin.Log.LogWarning($"LocationObjects: the layout of the room {room.m_prefab.Name} could not be read; its objects are not put back: {e}");
 				}
 				finally
 				{
