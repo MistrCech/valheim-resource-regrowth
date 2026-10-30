@@ -196,21 +196,31 @@ as deposits move. The ore in a deposit stays the same.
 the height it generated (after a location has levelled its own ground). A swing breaks rock only if the rock is the first thing
 it meets, so a piece wholly under that floor can never be reached. Raised 4 m, 262 of the 427 deposits on the live world still
 had such pieces, most of them on slopes. With `OverDeepestHole = 0.5`, every deposit is raised by what it needs itself, for each
-of its 130 pieces to reach 0.5 m over the deepest pit: measured from the pieces and the ground under each of them, levelled by
-the locations around as the game levels it. Zones generated later get the same, as they are generated. On a copy of the live world:
+of its 130 pieces to reach 0.5 m over the deepest pit: measured from the pieces and the ground under each of them as the game
+generates it, levelled by the locations around in every way they can stand (each turn one not placed yet can get, each part
+they may or may not spawn; where too many turns would have to be paired, the highest ground each can leave), with the deposit
+turned as it is and as the world's save brings it back (to the half degree). Zones generated later get the same, as they are
+generated. On a copy of the live world:
 
 | | Raised further | Pieces nobody can mine |
 |---|---|---|
 | `RaiseMeters = 4` | | 521, in 262 of 427 deposits |
-| and `OverDeepestHole = 0.5` | a median 1.4 m, at most 8 m; 36 deposits needed nothing | none |
+| and `OverDeepestHole = 0.5` | a median 1.4 m, at most 8 m; 36 deposits needed nothing | 15, all in the one deposit kept by a player's building |
 
 Checked against the floor the game builds itself (its own heightmap code, every location around spawned as a client spawns
-it), every raised deposit ended within 3 mm of 0.5 m over it, and a mining simulation through physics took out every piece; so
-did the 52 deposits of 226 zones generated during the test. A deposit broken open is raised too, its pieces coming up out of the
-player's pit. None is moved while a player's game may have it loaded (the zones a client loads its objects from, one zone
-wider): it waits for a later pass. One within 20 m of a player's building stays where it is. The setting is read at every pass;
-zones generated later need it on when the server starts. Back at -1, each deposit goes down by what this raised it, to the
-height `RaiseMeters` gives it.
+it; 3.8 million vertices, none different), with 52 more deposits in zones generated during the check: none is short of 0.5 m,
+before or after the save is loaded back (most are at 0.5, the rest up to 0.08 m over, for another way the deposit or the ground
+around can lie), and mining them through the game's own physics leaves no piece. The one exception is the deposit by a player's
+building, which stays where it was with 15 pieces under the floor. Measuring costs little: the deposits a pass finds are done
+in the frames after it, a few milliseconds a frame (on that copy 0.9 s of work in all, over 167 frames, the worst 7.7 ms), and
+those of a zone generated now take about 3 ms in the zone's own frame. The prefabs of the world's locations are read once, in
+the background, after the server starts.
+
+A deposit broken open is raised too, its pieces coming up out of the player's pit. None is moved while a player's game may have
+it loaded (the zones a client loads its objects from, one zone wider): it waits for a later pass. One within 20 m of a player's
+building stays where it is, whatever the setting. The setting is read at every pass; zones generated later need it on when the
+server starts. Back at -1, each deposit goes down by what this raised it, to the height `RaiseMeters` gives it; one broken open
+since stays where it is.
 
 ### Buildings of a camp or village
 

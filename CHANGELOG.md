@@ -8,11 +8,17 @@
   down at most (the game keeps the ground within 8 m of the height it generated), and a piece wholly under that floor can never
   be hit: raised 4 m, 521 pieces in 262 of the 427 deposits on the live world still were, most on slopes. Each deposit is now
   raised by what it needs itself, for every piece to reach this far over the deepest pit, measured from its own pieces and the
-  ground under them as the locations around level it; deposits in zones generated later are raised as the zone is generated. At
-  0.5 on a copy of the live world: 393 deposits raised a median 1.4 m further (at most 8 m), 36 high enough already, every one
-  within 3 mm of the 0.5 m against the floor the game builds itself, and a mining simulation through physics left no piece. A
-  deposit a player's game may have loaded waits for a later pass, one within 20 m of a player's building stays, and -1 puts back
-  down what it raised.
+  ground under them as the game generates it and the locations around level it, in every turn they can stand in and with every
+  part they may spawn (past a few hundred pairings of turns, at the highest ground each can leave), and in the deposit's turn now
+  and as the world's save brings it back; deposits in zones generated later are raised as the zone is generated. At 0.5 on a
+  copy of the live world: 393 deposits raised a median 1.4 m further (at most 8 m) and 36 high enough already. Checked against
+  the floor the game builds itself, with 52 more in zones generated then, none was short, before or after the save was loaded
+  back, and mining them through the game's physics left no piece; the one exception stays by a player's building, 15 of its
+  pieces under the floor. It took 0.9 s of work over 167 frames after the first pass (the worst frame 7.7 ms), and 3 ms for a
+  zone generated now. A deposit a player's game may have loaded waits for a later pass, one within 20 m of a player's building
+  stays, and -1 puts back down what it raised.
+
+## [0.9.0] - 2026-10-30
 
 ### Changed
 
