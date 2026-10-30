@@ -10,7 +10,8 @@ namespace ResourceRegrowth
 		What the plugin remembers between restarts, in a text file next to the world save:
 		- when a player was last near each zone;
 		- since when each depleted object has been seen depleted;
-		- which location pieces it put back fell for lack of support (not put back again before they stand once more).
+		- which location pieces it put back fell for lack of support (not put back again before they stand once more);
+		- where the doors of dungeons stood that went, as no layout says.
 
 		Times are real time in UTC. Both clocks start at the plugin's first run on a world, so
 		nothing regrows until IdleHours / AfterHours have passed since installing it -- the plugin
@@ -29,8 +30,12 @@ namespace ResourceRegrowth
 		private readonly Dictionary<Vector2s, KeyValuePair<int, Quaternion>> keepRotation = new Dictionary<Vector2s, KeyValuePair<int, Quaternion>>();
 		// Location objects: slots whose piece, once put back, fell for lack of support, and when.
 		private readonly Dictionary<string, DateTime> fell = new Dictionary<string, DateTime>();
+		// Location objects: the doors of dungeons that went, by prefab and place.
+		private readonly List<(int prefab, Vector3 position, Quaternion rotation)> doors = new List<(int, Vector3, Quaternion)>();
 
 		public DateTime? ZonesFirstRun { get; set; }
+		// How many metres over the game's height the copper deposits stand (CopperDeposits).
+		public float CopperRaised { get; set; }
 		/*
 			Since when presence is known completely: zone entries are forgotten after a while, and a zone
 			without one was not seen after this. Only moves forward; older versions kept IdleHours.
@@ -93,6 +98,15 @@ namespace ResourceRegrowth
 							break;
 						case "fell":
 							fell[f[1]] = Parse(f[2]);
+							break;
+						case "door":
+							doors.Add((int.Parse(f[1], CultureInfo.InvariantCulture),
+								new Vector3(float.Parse(f[2], CultureInfo.InvariantCulture), float.Parse(f[3], CultureInfo.InvariantCulture), float.Parse(f[4], CultureInfo.InvariantCulture)),
+								new Quaternion(float.Parse(f[5], CultureInfo.InvariantCulture), float.Parse(f[6], CultureInfo.InvariantCulture),
+									float.Parse(f[7], CultureInfo.InvariantCulture), float.Parse(f[8], CultureInfo.InvariantCulture))));
+							break;
+						case "copperraised":
+							CopperRaised = float.Parse(f[1], CultureInfo.InvariantCulture);
 							break;
 					}
 				}
@@ -185,6 +199,14 @@ namespace ResourceRegrowth
 			{
 				lines.Add($"fell {entry.Key} {Format(entry.Value)}");
 			}
+			foreach ((int prefab, Vector3 p, Quaternion q) in doors)
+			{
+				lines.Add(string.Format(CultureInfo.InvariantCulture, "door {0} {1:R} {2:R} {3:R} {4:R} {5:R} {6:R} {7:R}", prefab, p.x, p.y, p.z, q.x, q.y, q.z, q.w));
+			}
+			if (CopperRaised != 0f)
+			{
+				lines.Add("copperraised " + CopperRaised.ToString("R", CultureInfo.InvariantCulture));
+			}
 			string temp = path + ".tmp";
 			File.WriteAllLines(temp, lines);
 			if (File.Exists(path))
@@ -275,6 +297,22 @@ namespace ResourceRegrowth
 		}
 
 		public bool Fell(string key, out DateTime when) => fell.TryGetValue(key, out when);
+
+		public IReadOnlyList<(int prefab, Vector3 position, Quaternion rotation)> Doors => doors;
+
+		// Once for a place: a door put back and broken again is the same door.
+		public bool AddDoor(int prefab, Vector3 position, Quaternion rotation)
+		{
+			foreach ((int other, Vector3 at, Quaternion _) in doors)
+			{
+				if (other == prefab && (at - position).sqrMagnitude < 0.0025f)
+				{
+					return false;
+				}
+			}
+			doors.Add((prefab, position, rotation));
+			return true;
+		}
 		public bool ForgetFell(string key) => fell.Remove(key);
 
 		// A zone last seen before the cutoff counts as idle either way (LastSeen falls back to FirstRun, earlier still).

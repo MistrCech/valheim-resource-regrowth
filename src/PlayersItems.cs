@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 
 namespace ResourceRegrowth
@@ -6,24 +7,31 @@ namespace ResourceRegrowth
 	// What of a player's an object of the world holds: an item remembers having been in a player's bag (ItemData.m_pickedUp).
 	internal static class PlayersItems
 	{
-		// A chest, barrel or crate of the world with anything in it that has been in a player's bag: someone's storage.
+		// A chest, barrel or crate of the world with anything in it that has been in a player's bag: someone's storage. Unreadable: kept, to be safe.
 		public static bool InContainer(ZDO zdo)
 		{
-			byte[] items = zdo.GetByteArray(ZDOVars.s_items);
-			if (items == null)
+			return !TryRead(zdo, out List<ItemDrop.ItemData> items) || items.Any(item => item.m_pickedUp);
+		}
+
+		// What a chest, barrel or crate of the world holds; false if it cannot be read.
+		public static bool TryRead(ZDO zdo, out List<ItemDrop.ItemData> items)
+		{
+			items = new List<ItemDrop.ItemData>();
+			byte[] data = zdo.GetByteArray(ZDOVars.s_items);
+			if (data == null)
 			{
-				return false;
+				return true;
 			}
 			try
 			{
 				Inventory inventory = new Inventory("regrowth", null, 16, 16);
-				inventory.Load(new ZPackage(items));
-				return inventory.GetAllItems().Any(item => item.m_pickedUp);
+				inventory.Load(new ZPackage(data));
+				items = inventory.GetAllItems();
+				return true;
 			}
 			catch (Exception)
 			{
-				// Unreadable: kept, to be safe.
-				return true;
+				return false;
 			}
 		}
 

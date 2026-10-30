@@ -1,6 +1,6 @@
 # Sarkastic.gg Resource Regrowth
 
-![version: 0.8.11](https://img.shields.io/badge/version-0.8.11-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
+![version: 0.9.0](https://img.shields.io/badge/version-0.9.0-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
 
 [Source code](https://github.com/MistrCech/valheim-resource-regrowth)  ·  [Report a bug](https://github.com/MistrCech/valheim-resource-regrowth/issues/new)  ·  [Changelog](https://github.com/MistrCech/valheim-resource-regrowth/blob/main/CHANGELOG.md)  ·  [Dedicated Simulation](https://thunderstore.io/c/valheim/p/Sarkastic_gg/Dedicated_Simulation/)
 
@@ -10,16 +10,17 @@ A server-side [BepInEx](https://github.com/BepInEx/BepInEx) plugin for Valheim 1
 It brings one-time world content back once an area has been left alone for a while:
 
 - **Surtling core stands** get their core back.
-- **Treasure chests** (never player-built ones, and never one holding something of a player's) are restocked with fresh loot, whatever was left in them replaced. So are the other containers the world comes with a loot table of their own for: a shipwreck's chest, the granaries and timber halls of the Deep North, the ancient chests of Morkhalla.
+- **Treasure chests** (never player-built ones) are restocked with fresh loot: what was left of the old loot is replaced, and what a player left in them stays, the loot taking the free slots. So are the other containers the world comes with a loot table of their own for: a shipwreck's chest, the granaries and timber halls of the Deep North, the ancient chests of Morkhalla.
 - **One-time creature spawners** (dungeons, camps, caves) spawn their creature again.
 - A **location regrows as a whole**: a dungeon with its entrance, a camp, a village or a ruin comes
-  back all at once -- every core, every creature and every chest in it.
+  back all at once -- every core, every creature, every chest and every location object in it, and the doors close.
 - **Terrain** that players dug, raised, levelled or paved slowly returns to the land's own shape,
   except around player bases and wards.
 - **Location objects** (off by default): destroyed objects a location or village generated -- wild
   **beehives** in abandoned houses, for example -- are put back exactly where they stood. A muddy scrap
   pile in a sunken crypt (`mudpile2`, add it to `Prefabs`) is one too: the iron comes back with the
-  crypt's chests and creatures, and what is left of the pile that was hit goes with it.
+  crypt's chests and creatures, and what is left of the pile that was hit goes with it. So are the jewels
+  and coins lying on the ground in crypts and caves (see What lies on the ground).
 - **Zones** (off by default): a zone players have been in is **generated again by the game itself**
   once nobody has been near it for three days -- trees, rocks and ore deposits, bushes, pickables, the
   location with its buildings, chests, creatures and dungeon, and the ground -- as if no player had
@@ -38,7 +39,7 @@ the object's data. The plugin deletes and creates no objects.
 | What | Depleted when | Regrown by |
 |---|---|---|
 | Surtling core stand | the core was taken (`picked`) | setting `picked` back to false |
-| Treasure chest | vanilla filled it once, and it is now empty or a player has been near it since it was last restocked | replacing its contents with fresh loot from the chest's own loot table, as vanilla fills it when the chest is first generated |
+| Treasure chest | vanilla filled it once, and it is now empty or a player has been near it since it was last restocked | replacing what is left of its loot with fresh loot from the chest's own loot table, as vanilla fills it when the chest is first generated; what has been in a player's bag stays in its slot |
 | One-time spawner | its creature is gone | clearing the spawned link; vanilla spawns again the next time a player loads the area |
 | Terrain (a zone's `_TerrainCompiler`) | any vertex of the zone's heightmap is modified or painted | a step every `StepHours`: every height change outside a protected area is divided by `Divider` (1.7) and dropped once below `MinDelta`; paint goes back to nothing once the height under it is back, except paved and cultivated ground. The data is written in the game's own format; loaded terrain reloads it and every client rebuilds the ground. |
 
@@ -75,28 +76,44 @@ fractured remains; 11 were put back at their own places (the twelfth had lost a 
 back inside a dungeon (5000 m up), nor does a tombstone down there hold back the surface above it.
 
 Whether a player took everything from a chest, some of it or nothing cannot be told from the chest,
-so a chest counts as used once a player has been near it; when its time comes it is emptied and
-filled afresh, partly looted or not.
+so a chest counts as used once a player has been near it, or with nothing left in it but what a player put there;
+when its time comes its loot is replaced, partly looted or not. What a player left in it (an item remembers having been in a bag) stays where it is, and
+the new loot goes in the slots that are free, never onto their stack: a stone left in a crypt's chest neither keeps
+the chest from being restocked nor is lost, and a chest full of a player's things stays as it is. What a player puts on a
+stack of the loot (dragged onto it, or with "place stacks") stays the world's in the game; a stack holding more than the
+loot can roll (at the world's resource rate) counts as theirs, and a few put on one, up to that, go with the loot.
+`[TreasureChests] KeepPlayersItems = false` replaces those too.
 
 **A location regrows as a whole** (`[Locations] Together`). Every object belongs to the location the
-world generated it with: inside a dungeon (5000 m up) to the dungeon its generator built -- rooms lie
-within about 60 m of it -- and to the location at the same spot on the surface, so a burial chamber's
-interior and its entrance are one; a cave whose interior comes whole with the location (troll and
-bear caves) by its interior radius; on the surface to the location whose ground it stands on. Each
-used-up object keeps its own clock, and as soon as one of them has waited its category's `AfterHours`,
-everything used up in the location comes back together, and every chest in it is restocked: a burial
-chamber whose cores were taken 10 hours ago returns whole, chests and draugr included. With
-`Together = false` each object regrows on its own.
+world generated it with: inside a dungeon (5000 m up) to the location of its zone, as the rooms of a
+dungeon lie within the zone of the generator that built them and a cave comes whole with its location,
+so a burial chamber's interior and its entrance are one; on the surface to the location whose ground it
+stands on, or the camp or village whose room it stands by. Each used-up or missing object keeps its own
+clock, and as soon as one of them has waited its category's `AfterHours`, everything used up or missing in
+the location comes back together: the cores, the creatures, the location objects, and every chest in it
+restocked. The doors in it that a player can close by hand close (not those with a key, and not those
+that stay open once opened, which nobody could open again). A burial chamber whose cores were taken 10
+hours ago returns whole, chests, draugr and scrap piles included. With `Together = false` each object
+regrows on its own.
 
 Every `CheckIntervalMinutes` the plugin scans the world. A location (or a lone object) regrows only when all of these hold:
 
-- one of its objects has been used up for its category's `AfterHours`;
+- one of its objects has been used up or missing for its category's `AfterHours`;
 - no player has been near any of it for `IdleHours`;
 - none of it lies within `PlayerBuildRadius` of a player-built piece or tombstone;
 - none of it is in use: no connected player owns it, and the server does not have it loaded.
   Dedicated Simulation, for example, loads the zones around players on the server.
 
-A scan of a large world (165,000 objects) takes about 15 ms of work, spread over about 40 frames.
+Whatever holds a location back holds all of it: nothing comes back while the rest does not, and the log says
+what holds it, once a run (`Held:`). Only a dungeon has two sides. A build by its entrance on the surface, a
+portal or a ladder, keeps back what is on the surface there, which then has no say in when the interior comes back;
+the interior comes back whole. A build or a tombstone inside holds everything. A piece that fell after being put back
+and an object whose holder is gone stay away by themselves: they neither make the location due nor hold it back.
+
+The decisions run over frames, as the scan does: on a world of 864,000 objects a scan takes 570-830 ms of work over
+about 320 frames, the worst of them 9-23 ms (35-40 ms in the first pass after a start, which also reads the layouts).
+The same decisions taken in one frame cost 430-500 ms on that world. A location's layout is read in one frame: listing the
+Ashlands ruins (`Charred*`) makes that frame 137 ms, as CharredRuins1 has 6 places on that world.
 
 ### Boss items
 
@@ -134,6 +151,45 @@ of a workbench. Valheim 1.0.20 has these, scarce and needed, that no hourly list
 The Morkhalla eyes (`Morkhalla_Eye1` to `Morkhalla_Eye7_gemstone`: gemstones, hundreds in one hall) are no entry
 here: listed in `[SurtlingCores]` they would bring a gem hoard back on every visit.
 
+### What lies on the ground
+
+The jewels, coins and bones lying about in crypts and caves are objects the world placed once, and nothing in the game
+brings them back. Listed in `[LocationObjects] Prefabs` they come back with the rest of their location, each rolling
+anew what it is, as it does when the game first places it: a ruby this time can be amber the next.
+
+| Lies in | Prefab | What it can be |
+|---|---|---|
+| burial chambers, Hildir's crypt, troll caves | `Pickable_ForestCryptRandom` | jewels and coins |
+| sunken crypts | `Pickable_SunkenCryptRandom` | jewels, coins, withered bones |
+| mountain caves, Hildir's cave | `Pickable_MountainCaveRandom`, `Pickable_Item` | jewellery and wolf parts |
+| dolmens, `ShipSetting01` | `Pickable_DolmenTreasure` | a small treasure |
+| burial chambers, caves, ruins, the Deep North | `Pickable_ForestCryptRemains01` to `04` | bone fragments |
+| mountain caves, `MorgenHole` | `Pickable_MeatPile` | entrails |
+| mountain caves with a lake | `Pickable_Fishingrod` | a fishing rod |
+
+Stones, flint and branches lying on the land belong to the land, not to a location: those come back with `[Zones]`, and
+not in a zone it protects.
+
+### Copper deposits
+
+A copper deposit is an iceberg. The game puts it 2 m under the ground, and its 130 pieces reach 13 m down from there and only
+4 m up, with one copper ore in a piece on average. On a world with 427 untouched deposits, all of them stood at that height
+within 4 cm, and how many pieces reached over the ground went by the lie of the land:
+
+| `RaiseMeters` | Pieces over the ground, median | The worst deposit | Rock on level ground |
+|---|---|---|---|
+| 0 (the game) | 46 | 18 | 2 m tall |
+| 2 | 69 | 46 | 4 m |
+| 4 | 88 | 62 | 6 m |
+| 6 | 104 | 78 | 8 m, its underside showing |
+
+The rest has to be dug for, and a pit goes 8 m down at most. Raised, the deposits of zones still to be generated stand higher,
+and so do those standing, once, within a pass of the setting changing. One a player has broken open stays where it is, with
+their pit around it, and so does one within 20 m of a player's building: the rock is 28 m across and must not come up through a
+floor. Players need nothing; a client reads the height from the object, so one standing by a deposit as it moves sees it
+where it was until the zone loads again (change the setting while the server is down to avoid that). The world is saved as soon
+as deposits move. The ore in a deposit stays the same.
+
 ### Buildings of a camp or village
 
 The walls, poles, roofs and stairs of a Fuling village, camp or stone tower are location objects too. Listed in
@@ -170,6 +226,17 @@ run down: of 272 missing pieces 185 were put back (stone towers, villages, camps
 for a totem pole that had held them. Each of the 177 in the 10 zones then generated again by the game itself stood where
 the game puts its own, to the millimetre, and none beside one standing. With a simulated player near a village for two
 minutes, one banner fell, was not put back again, and stood again when `[Zones]` generated the village.
+
+### Whole locations
+
+`[LocationObjects] Locations` takes location names instead of prefabs: every breakable part of them comes back with the
+rest of the location, without listing it: building pieces, treasure chests, props, torches, roots, rocks and nests, also in
+the rooms of their dungeon or village. A chest that was broken comes back with the rest, filled (not one in
+`[TreasureChests] ExcludePrefabs`, which the game would fill). The doors in
+the doorways of a dungeon, which its generator draws as it goes and no layout knows, come back too once the plugin has seen them go; one that went
+before 0.9.0 waits for `[Zones]`. `*` matches any run of characters (`Crypt*`, `Mistlands_*`). `LocationsExclude` names prefabs this never puts back.
+Creature spawners and what is picked have their own entries, and what comes and goes by itself (a bird, a fire that burns
+out) is never put back.
 
 ### Zones
 
@@ -300,11 +367,12 @@ without a restart (a list read again is said in the log); `Enabled`, the switche
 | Safety | IdleHours | 5 | real hours since a player was near the zone |
 | Safety | PresenceRadiusZones | 2 | a player counts as near all zones (64 m) within this many of their own |
 | Safety | PlayerBuildRadius | 48 | metres around player-built pieces and tombstones that are never touched |
-| Locations | Together | true | a location regrows as a whole: once one thing in it is due, every core, creature and chest in it comes back |
+| Locations | Together | true | a location regrows as a whole: once one thing in it is due, every core, creature, chest and location object in it comes back |
 | SurtlingCores | Enabled / AfterHours | true / 10 | |
 | SurtlingCores | Prefabs | Pickable_SurtlingCoreStand | hide-when-picked, non-respawning pickables to restore; `name:hours` gives one its own hours instead of AfterHours (`goblin_totempole:24`, the Fuling totem) |
 | TreasureChests | Enabled / AfterHours | true / 24 | hours after a player was first near the chest (or it was seen empty) since it was last restocked |
 | TreasureChests | ExcludePrefabs | | chest prefabs never to refill, e.g. `TreasureChest_meadows_buried` or `shipwreck_karve_chest` |
+| TreasureChests | KeepPlayersItems | true | what a player left in a chest stays, and the loot takes the free slots; false: it is replaced with the rest, and gone |
 | Terrain | Enabled / AfterHours / StepHours | true / 48 / 24 | what players dug or paved is first stepped back 48 h after it was first seen, once nobody has been near for `Safety IdleHours`, and then at most once every 24 h |
 | Terrain | Divider / MinDelta | 1.7 / 0.2 | a step divides every height change outside a protected area by this and drops it once below this many metres |
 | Terrain | ProtectMultiplier | 1 | the protected radius of a base object or ward is its own times this |
@@ -314,7 +382,9 @@ without a restart (a list read again is said in the log); `Enabled`, the switche
 | DungeonMonsters | Enabled / AfterHours | true / 24 | |
 | DungeonMonsters | ExcludePrefabs | | spawner prefabs never to reset |
 | LocationObjects | Enabled / AfterHours | false / 48 | put back destroyed objects of locations and villages (needs a restart) |
-| LocationObjects | Prefabs | Beehive | which ones; only world-generated objects are ever put back (boss items: see Boss items; walls and roofs: see Buildings of a camp or village) |
+| LocationObjects | Prefabs | Beehive | which ones; only world-generated objects are ever put back (boss items: see Boss items; jewels and coins: see What lies on the ground; walls and roofs: see Buildings of a camp or village) |
+| LocationObjects | Locations / LocationsExclude | | locations whose every breakable part is put back, `*` matching any run of characters; prefabs that never are (see Whole locations; needs a restart) |
+| CopperDeposits | RaiseMeters | 0 | metres higher than the game puts copper deposits, up to 8 (see Copper deposits); back to 0 puts them back |
 | Zones | Enabled | false | generate visited zones again as the world first made them (needs a restart) |
 | Zones | DryRun | true | only log which zones would be generated again |
 | Zones | IdleHours | 72 | real hours with nobody near before a zone is generated again |

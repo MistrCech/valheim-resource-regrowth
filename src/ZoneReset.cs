@@ -960,6 +960,7 @@ namespace ResourceRegrowth
 			{
 				return;
 			}
+			Regrowth.Active?.Replacing(zdo);
 			zdo.SetOwner(ZDOMan.GetSessionID());
 			ZDOMan.instance.DestroyZDO(zdo);
 		}

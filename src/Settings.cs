@@ -29,6 +29,8 @@ namespace ResourceRegrowth
 		public readonly ConfigEntry<bool> ChestsEnabled;
 		public readonly ConfigEntry<float> ChestsAfterHours;
 		public readonly ConfigEntry<string> ChestsExclude;
+		public readonly ConfigEntry<bool> ChestsKeepPlayersItems;
+		public readonly ConfigEntry<float> CopperRaiseMeters;
 
 		public readonly ConfigEntry<bool> SpawnersEnabled;
 		public readonly ConfigEntry<float> SpawnersAfterHours;
@@ -37,6 +39,8 @@ namespace ResourceRegrowth
 		public readonly ConfigEntry<bool> LocationObjectsEnabled;
 		public readonly ConfigEntry<float> LocationObjectsAfterHours;
 		public readonly ConfigEntry<string> LocationObjectsPrefabs;
+		public readonly ConfigEntry<string> LocationObjectsLocations;
+		public readonly ConfigEntry<string> LocationObjectsLocationsExclude;
 		public readonly ConfigEntry<bool> LocationObjectsClearRemains;
 
 		public readonly ConfigEntry<bool> ZonesEnabled;
@@ -74,10 +78,10 @@ namespace ResourceRegrowth
 			PresenceRadiusZones = config.Bind("Safety", "PresenceRadiusZones", 2,
 				"A player counts as near every zone (64 m square) within this many zones of their own.");
 			PlayerBuildRadius = config.Bind("Safety", "PlayerBuildRadius", 48f,
-				"Nothing within this many metres (horizontally) of a player-built piece or a tombstone is regrown.");
+				"Nothing within this many metres (horizontally) of a player-built piece or a tombstone is regrown; with Locations.Together nothing of a location that has any part so near. The surface and a dungeon's interior 5000 m above it do not count for each other.");
 
 			LocationsTogether = config.Bind("Locations", "Together", true,
-				"Everything a location holds regrows together -- a dungeon's interior with its entrance, a camp, a village, a ruin: as soon as one thing in it is due (each kind after its own AfterHours), every surtling core taken, every creature killed and every treasure chest in it come back at once. Off: each object on its own clock.");
+				"Everything a location holds regrows together -- a dungeon's interior with its entrance, a camp, a village, a ruin: as soon as one thing in it is due (each kind after its own AfterHours), every surtling core taken, every creature killed, every treasure chest and every location object missing in it come back at once, and the doors in it that a player can close by hand close. A player's build or tombstone near any of it holds all of it back; only a dungeon has two sides, and a build by its entrance keeps back what is on the surface while the interior comes back whole. Off: each object on its own clock.");
 
 			CoresEnabled = config.Bind("SurtlingCores", "Enabled", true,
 				"Put taken surtling cores back on their stands (burial chambers and similar).");
@@ -92,6 +96,8 @@ namespace ResourceRegrowth
 				"Real hours after a player was first near a chest (or it was seen empty) since it was last restocked. Whether anything was taken cannot be told from a chest, so being near it counts.");
 			ChestsExclude = config.Bind("TreasureChests", "ExcludePrefabs", "",
 				"Chest prefabs never to refill, e.g. TreasureChest_meadows_buried for dug-up treasure or shipwreck_karve_chest for the chests of wrecks. Comma separated.");
+			ChestsKeepPlayersItems = config.Bind("TreasureChests", "KeepPlayersItems", true,
+				"What a player left in a chest of the world (an item remembers having been in a bag) stays in its slot when the chest is restocked, and the loot goes in the free slots. False: it is replaced with the rest of what is in the chest, and gone.");
 
 			SpawnersEnabled = config.Bind("DungeonMonsters", "Enabled", true,
 				"Let one-time creature spawners (dungeons, camps, caves) spawn again once their creature is dead.");
@@ -103,11 +109,22 @@ namespace ResourceRegrowth
 			LocationObjectsEnabled = config.Bind("LocationObjects", "Enabled", false,
 				"Put destroyed objects that a location or a village generated back where they stood -- wild beehives, for example. Unlike everything else here this creates objects, so it is off until switched on. Needs a restart.");
 			LocationObjectsAfterHours = config.Bind("LocationObjects", "AfterHours", 48f,
-				"Real hours after the plugin first saw the object missing.");
+				"Real hours after the plugin first saw the object missing. With Locations.Together this is the longest it waits: it comes back with the rest of its location, whatever made that due.");
 			LocationObjectsPrefabs = config.Bind("LocationObjects", "Prefabs", "Beehive",
 				"Prefabs to put back. Only objects the world itself generated in a location or village room are ever recreated, never player-built ones. Comma separated. Needs a restart. A muddy scrap pile in a sunken crypt is `mudpile2`. Building pieces of a camp or village (walls, poles, roofs) can go here too; one that falls for lack of support after being put back waits until its zone is generated again ([Zones]).");
+			LocationObjectsLocations = config.Bind("LocationObjects", "Locations", "",
+				"Locations whose every breakable part is put back, without listing prefabs: building pieces (black marble, stave walls, the walls of a fortress), props, rocks and ore, trees and nests -- also in the rooms of their dungeon or village. "
+				+ "Not chests ([TreasureChests] fills them), creature spawners ([DungeonMonsters]), pickables (one that goes when picked can go in Prefabs) or items lying about. "
+				+ "The parts of one location come back with the rest of it ([Locations] Together), so a building stands whole. "
+				+ "Comma separated location names as the game has them; * matches any run of characters (Mistlands_*, Charred*). Needs a restart.");
+			LocationObjectsLocationsExclude = config.Bind("LocationObjects", "LocationsExclude", "",
+				"Prefabs that Locations never puts back, e.g. a nest (Spawner_CharredStone). Comma separated. Needs a restart.");
 			LocationObjectsClearRemains = config.Bind("LocationObjects", "ClearRemains", true,
-				"When an object is put back, what is left of it goes: the fractured remains the game spawns when a pile or rock is hit (the prefab's name and \"_frac\") within 1.5 m of its place. Without this the pile would stand twice, once whole and once as the pieces still to mine.");
+				"When an object is put back, what is left of it goes: the fractured remains the game spawns when a pile or rock is hit (the prefab's name and \"_frac\", or what it turns into when it breaks), or a felled tree's stump, within 1.5 m of its place. Without this the pile would stand twice, once whole and once as the pieces still to mine.");
+
+			CopperRaiseMeters = config.Bind("CopperDeposits", "RaiseMeters", 0f,
+				new ConfigDescription("Metres higher than the game puts copper deposits, in zones still to be generated and on the deposits that stand (not one broken open or within 20 m of a player's building). The game sinks them so far that a median of 46 of a deposit's 130 pieces reach over the ground, the worst 18; 4 m: 88, the worst 62, and the rock up to 6 m tall. Back to 0 puts them back. Read at every pass.",
+					new AcceptableValueRange<float>(0f, 8f)));
 
 			ZonesEnabled = config.Bind("Zones", "Enabled", false,
 				"Generate a zone players have been in again, as the world first made it, once nobody has been near it for IdleHours: trees, rocks, ore deposits, bushes, pickables, the location with its buildings, chests, creatures and dungeon, and the ground -- as if no player had ever been there. Never a zone with a workbench in it or within PlayerBuildRadius (a base), never a protected location. Players' things elsewhere stay where they are (pieces, tombstones, ships, carts, items they carried, tamed creatures, chests and stands holding something of theirs); fields, roads and trees they planted go with the reset unless a workbench is near. Unlike the rest this deletes and creates objects, so it is off until switched on. Needs a restart.");

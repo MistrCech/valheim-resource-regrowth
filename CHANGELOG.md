@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.9.0] - 2026-10-30
+
+### Changed
+
+- `[Locations] Together`: a location now regrows as one. Location objects used to wait on a clock and a rule of their own,
+  so in a crypt the iron piles could come back while the chests and creatures did not, or the other way round. They are
+  now part of their location: as soon as one thing in it has waited its `AfterHours`, everything used up or missing in it
+  comes back at once, every restockable chest is restocked, and the doors a player can close by hand close (not those
+  with a key, and not those that stay open once opened). Whatever holds a location back holds all of it, and the log says
+  what, once a run (`Held:`).
+- A chest with something of a player's in it is restocked too. It counted as someone's storage and never came back, so a
+  stone or a torch left in it kept it empty for good (8 of 1422 chests on the live world, in the end). What a player left stays
+  in its slot and the loot takes the free slots, never joining their stack. A stack of the loot that a player put more of the
+  same on stays the world's in the game; one holding more than the loot can roll at the world's resource rate counts as theirs. A chest left with only a
+  player's things counts as used even if nobody has been near it since. `[TreasureChests] KeepPlayersItems = false` replaces
+  those things with the rest.
+- A dungeon has two sides. A player's portal, ladder or workbench by the entrance on the surface used to hold the whole
+  dungeon for ever. It now keeps back only what is on the surface there, and the interior comes back whole. A build or a
+  tombstone inside still holds everything.
+- Which location an object belongs to: inside a dungeon, the location of its own zone, as a dungeon's rooms lie within
+  the zone of the generator that built them. It used to be the nearest generator, which on a world with 4283 such objects
+  was another dungeon's for 21 of them. On the surface, the camp or village whose room it stands by (within 8 m, and nearer
+  than any location's centre), else the location whose ground it stands on.
+- The decisions of a pass run over frames, as the scan does: 9-23 ms the worst frame on a world of 864,000 objects, where
+  the same decisions took 430-500 ms in one frame. A pass with the longer lists below costs about what the old one did.
+
+### Added
+
+- `[CopperDeposits] RaiseMeters` (default 0, the game's height): a copper deposit stands this much higher, in zones still to
+  be generated and where it stands, unless it was broken open or a player has built within 20 m. The game sinks it so far that
+  a median of 46 of its 130 pieces reach over the ground, the worst 18; raised 4 m, 88 and 62. The world is saved as soon as
+  the deposits move, and a dry run leaves new ones at the height of those that stand.
+- `[LocationObjects] Locations` and `LocationsExclude`: location names instead of prefabs, `*` matching any run of
+  characters. Every breakable part of them comes back with the rest of the location, also in the rooms of their dungeon or
+  village: building pieces, treasure chests, props, torches, roots, rocks and nests. A chest that was broken comes back with
+  the rest, filled; it no longer keeps away what stood beside it. One in `[TreasureChests] ExcludePrefabs` stays away, as the
+  game would fill it. Measured on a world of 864,000 objects with
+  `Hildir_crypt,Hildir_cave,Hildir_plainsfortress,Crypt*,SunkenCrypt*,TrollCave*,MountainCave*`: 570-780 ms of work a pass, 1.1-1.3 s the first after a start, which also reads the layouts.
+- The doors of a dungeon come back with it: a crypt's wooden doors, a sunken crypt's iron gates, a cave's hanging cloths and walls of ice. Its generator
+  draws them as it goes and no layout says where one stood, so the plugin notes a door when it goes (`door` lines in the state file, saved at once), as
+  part of the dungeon whose room lies nearest. One broken before this version is not known; it comes back only when `[Zones]` generates its zone again.
+- `[LocationObjects] Prefabs` can bring back what lies on the ground: jewels and coins (`Pickable_ForestCryptRandom`,
+  `Pickable_SunkenCryptRandom`, `Pickable_MountainCaveRandom`, `Pickable_DolmenTreasure`, `Pickable_Item`), bones and meat
+  (`Pickable_ForestCryptRemains01` to `04`, `Pickable_MeatPile`). A put-back one rolls what it is at once: the game rolls
+  only on a machine that owns the object, and a player could otherwise find one with nothing in it.
+
+### Fixed
+
+- A location object counts as there only on its very spot, unless it moves by itself (a rock that falls, a blob of tar afloat
+  on its pit). A gem
+  taken from a heap did not come back while another of its kind lay within 1.5 m, as 218 of 469 in a sunken crypt do; the same
+  went for mud piles, ice and crystals.
+- A put-back object keeps the size it was generated with: roots and ice in caves are scaled up to 3 times, and came back
+  at the prefab's size.
+- A put-back building piece starts under snow where snow can lie, as the pieces the game generates do. It came back bare.
+- What the game sets on the ground (`SnapToGround`) was put back at the height of its layout, up to 4 m off the ground. It
+  is now set on the ground the next time its zone is loaded, also after a restart.
+- A put-back building piece that came down by itself counted as fallen only for lack of support. Rain, snow, ash, lava and
+  a wrong biome count too: such a piece does not come back to fall again.
+- Objects that remove themselves after a time (`Destructible` with a time to live) are no longer taken for location objects.
+
 ## [0.8.11] - 2026-10-24
 
 ### Added
