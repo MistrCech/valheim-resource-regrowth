@@ -1,6 +1,18 @@
 # Changelog
 
-## [0.9.0] - 2026-10-30
+## [0.9.1] - 2026-10-30
+
+### Added
+
+- `[CopperDeposits] OverDeepestHole` (default -1, off): every piece of a copper deposit within a pickaxe's reach. A pit goes 8 m
+  down at most (the game keeps the ground within 8 m of the height it generated), and a piece wholly under that floor can never
+  be hit: raised 4 m, 521 pieces in 262 of the 427 deposits on the live world still were, most on slopes. Each deposit is now
+  raised by what it needs itself, for every piece to reach this far over the deepest pit, measured from its own pieces and the
+  ground under them as the locations around level it; deposits in zones generated later are raised as the zone is generated. At
+  0.5 on a copy of the live world: 393 deposits raised a median 1.4 m further (at most 8 m), 36 high enough already, every one
+  within 3 mm of the 0.5 m against the floor the game builds itself, and a mining simulation through physics left no piece. A
+  deposit a player's game may have loaded waits for a later pass, one within 20 m of a player's building stays, and -1 puts back
+  down what it raised.
 
 ### Changed
 

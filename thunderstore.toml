@@ -9,7 +9,7 @@ schemaVersion = "0.0.1"
 [package]
 namespace = "Sarkastic_gg"
 name = "Resource_Regrowth"
-versionNumber = "0.9.0"
+versionNumber = "0.9.1"
 description = "Server-side BepInEx plugin for Valheim 1.0 servers: brings back surtling cores, chest loot, monsters, beehives, crypt iron, cave items, terrain and whole zones in areas left alone. Vanilla clients. Recommended with Dedicated_Simulation."
 websiteUrl = "https://github.com/MistrCech/valheim-resource-regrowth"
 containsNsfwContent = false

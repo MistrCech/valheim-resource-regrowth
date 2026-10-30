@@ -596,7 +596,7 @@ namespace ResourceRegrowth
 		private const float LoadTimeoutSeconds = 30f;
 
 		// Holds a reference like Load does; the caller releases it whatever the outcome.
-		private static IEnumerator LoadAsync(SoftReference<GameObject> prefab, Action<bool> done)
+		internal static IEnumerator LoadAsync(SoftReference<GameObject> prefab, Action<bool> done)
 		{
 			bool finished = false;
 			LoadResult result = LoadResult.Failed;

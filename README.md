@@ -1,6 +1,6 @@
 # Sarkastic.gg Resource Regrowth
 
-![version: 0.9.0](https://img.shields.io/badge/version-0.9.0-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
+![version: 0.9.1](https://img.shields.io/badge/version-0.9.1-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
 
 [Source code](https://github.com/MistrCech/valheim-resource-regrowth)  ·  [Report a bug](https://github.com/MistrCech/valheim-resource-regrowth/issues/new)  ·  [Changelog](https://github.com/MistrCech/valheim-resource-regrowth/blob/main/CHANGELOG.md)  ·  [Dedicated Simulation](https://thunderstore.io/c/valheim/p/Sarkastic_gg/Dedicated_Simulation/)
 
@@ -191,6 +191,26 @@ their pit around it, and so does one within 20 m of a player's building: the roc
 floor. Players need nothing; a client reads the height from the object, so one standing by a deposit as it moves sees it
 where it was until the zone loads again (change the setting while the server is down to avoid that). The world is saved as soon
 as deposits move. The ore in a deposit stays the same.
+
+`OverDeepestHole` makes sure the rest can be dug for. A pickaxe takes 0.5 m a hit, and the game keeps the ground within 8 m of
+the height it generated (after a location has levelled its own ground). A swing breaks rock only if the rock is the first thing
+it meets, so a piece wholly under that floor can never be reached. Raised 4 m, 262 of the 427 deposits on the live world still
+had such pieces, most of them on slopes. With `OverDeepestHole = 0.5`, every deposit is raised by what it needs itself, for each
+of its 130 pieces to reach 0.5 m over the deepest pit: measured from the pieces and the ground under each of them, levelled by
+the locations around as the game levels it. Zones generated later get the same, as they are generated. On a copy of the live world:
+
+| | Raised further | Pieces nobody can mine |
+|---|---|---|
+| `RaiseMeters = 4` | | 521, in 262 of 427 deposits |
+| and `OverDeepestHole = 0.5` | a median 1.4 m, at most 8 m; 36 deposits needed nothing | none |
+
+Checked against the floor the game builds itself (its own heightmap code, every location around spawned as a client spawns
+it), every raised deposit ended within 3 mm of 0.5 m over it, and a mining simulation through physics took out every piece; so
+did the 52 deposits of 226 zones generated during the test. A deposit broken open is raised too, its pieces coming up out of the
+player's pit. None is moved while a player's game may have it loaded (the zones a client loads its objects from, one zone
+wider): it waits for a later pass. One within 20 m of a player's building stays where it is. The setting is read at every pass;
+zones generated later need it on when the server starts. Back at -1, each deposit goes down by what this raised it, to the
+height `RaiseMeters` gives it.
 
 ### Buildings of a camp or village
 
@@ -387,6 +407,7 @@ without a restart (a list read again is said in the log); `Enabled`, the switche
 | LocationObjects | Prefabs | Beehive | which ones; only world-generated objects are ever put back (boss items: see Boss items; jewels and coins: see What lies on the ground; walls and roofs: see Buildings of a camp or village) |
 | LocationObjects | Locations / LocationsExclude | | locations whose every breakable part is put back, `*` matching any run of characters; prefabs that never are (see Whole locations; needs a restart) |
 | CopperDeposits | RaiseMeters | 0 | metres higher than the game puts copper deposits, up to 8 (see Copper deposits); back to 0 puts them back |
+| CopperDeposits | OverDeepestHole | -1 | raise each copper deposit further, until every piece of it reaches this many metres over the deepest pit a pickaxe can dig (up to 4; 0.5 recommended); -1 = off, and what it raised goes back down |
 | Zones | Enabled | false | generate visited zones again as the world first made them (needs a restart) |
 | Zones | DryRun | true | only log which zones would be generated again |
 | Zones | IdleHours | 72 | real hours with nobody near before a zone is generated again |

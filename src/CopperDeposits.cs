@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using HarmonyLib;
 using UnityEngine;
 
@@ -21,15 +20,15 @@ namespace ResourceRegrowth
 		pickaxe can dig around it (CopperReach). Even 4 m higher, 262 of the 427 deposits of that copy kept pieces under it, 521 in all, most on
 		slopes; each raised by its own need, the kit's mining simulation took every piece out. The deposit keeps what it was raised by (UpHash), so
 		another margin or switching it off (-1) moves it by the difference, and what it was measured for (MeasuredHash), so it is measured once.
-		A deposit standing is measured in the frames after each pass, a few milliseconds a frame, never one with a player within PlayerRadius (it waits
-		for a later pass): a broken-open one too, its pieces coming up out of the player's pit. One in a zone generated now is raised in the same frame
-		(ZoneSystem.SpawnZone), before anyone is sent it.
+		The deposits a pass finds (its scan, a few thousand objects a frame) are measured in the frames after it, about 4 ms a frame, never one a
+		player's game may have loaded (Loaded; it waits for a later pass): a broken-open one too, its pieces coming up out of the player's pit. One
+		in a zone generated now is raised in the same frame (ZoneSystem.SpawnZone), before anyone is sent it. One kept for a building is not moved
+		again, down either: the building may stand on it.
 	*/
 	internal static class CopperDeposits
 	{
 		private const string Prefab = "rock4_copper";
 		private const float BuildRadius = 20f;
-		private const float PlayerRadius = 200f;
 		private const double WorkMilliseconds = 4.0;
 		private static readonly int KeptHash = (RegrowthPlugin.GUID + ".copperkept").GetStableHashCode();
 		private static readonly int UpHash = (RegrowthPlugin.GUID + ".copperup").GetStableHashCode();
@@ -38,6 +37,9 @@ namespace ResourceRegrowth
 		private static readonly Queue<ZDOID> queue = new Queue<ZDOID>();
 		private static Batch batch;
 		private static Dictionary<Vector2s, List<Vector3>> builds;
+		// A dry run moves and marks nothing: what it measured for a stamp is remembered here instead, so it reports once.
+		private static readonly HashSet<ZDOID> dryMeasured = new HashSet<ZDOID>();
+		private static int dryStamp;
 		// What a zone generated now is measured with; null until Regrowth runs.
 		private static Settings current;
 		private static RegrowthState currentState;
@@ -47,7 +49,8 @@ namespace ResourceRegrowth
 			public float margin;
 			public int stamp;
 			public bool dryRun;
-			public int measured, enough, kept, postponed, failed, byLocation;
+			public int measured, enough, kept, postponed, failed, byLocation, frames, waitedFrames;
+			public double workMilliseconds, worstMilliseconds;
 			public readonly List<float> up = new List<float>(), down = new List<float>();
 		}
 
@@ -57,26 +60,43 @@ namespace ResourceRegrowth
 			nothingYet: the world has had no objects since the server started (a new one nobody has come to; a dedicated server generates zones
 			only around players). Without objects otherwise, it is shutting down.
 		*/
-		public static bool Apply(Settings settings, RegrowthState state, HashSet<int> piecePrefabs, bool worldLoaded, bool nothingYet)
+		public static bool Apply(Settings settings, RegrowthState state, MonoBehaviour host, HashSet<int> piecePrefabs, bool worldLoaded, bool nothingYet)
 		{
 			current = settings;
 			currentState = state;
+			CopperReach.Start(host);
 			bool changed = Raise(settings, state, piecePrefabs, worldLoaded, nothingYet);
-			if (worldLoaded)
+			// A zone generated now is measured in its own frame: the locations near it must have been read by then.
+			if (settings.CopperOverDeepestHole.Value >= 0f && worldLoaded && CopperReach.Ready())
 			{
-				Enqueue(settings, state);
+				CopperReach.AskAll();
+			}
+			// A batch measured for another setting is of no use: the next scan queues what the new one needs.
+			float margin = settings.CopperOverDeepestHole.Value;
+			if (batch != null && (batch.margin != margin || batch.dryRun != settings.DryRun.Value || batch.stamp != Stamp(margin, state.CopperRaised)))
+			{
+				RegrowthPlugin.Log.LogInfo($"Copper deposits over the deepest hole: the setting changed with {queue.Count} deposit(s) of the batch still to do; what is done stays, the rest is measured for the new one.");
+				Report(batch);
+				End();
 			}
 			return changed;
 		}
 
 		public static void Stop()
 		{
-			queue.Clear();
-			batch = null;
-			builds = null;
+			End();
+			dryMeasured.Clear();
 			current = null;
 			currentState = null;
 			CopperReach.Reset();
+		}
+
+		private static void End()
+		{
+			queue.Clear();
+			batch = null;
+			builds = null;
+			CopperReach.Forget();
 		}
 
 		private static bool Raise(Settings settings, RegrowthState state, HashSet<int> piecePrefabs, bool worldLoaded, bool nothingYet)
@@ -156,89 +176,160 @@ namespace ResourceRegrowth
 		// What a deposit was measured for: the margin, the height RaiseMeters gave it, and how it was measured.
 		private static int Stamp(float margin, float raised)
 		{
-			return $"1 {margin:0.###} {raised:0.###}".GetStableHashCode();
+			return $"2 {margin:0.###} {raised:0.###}".GetStableHashCode();
 		}
 
-		// The deposits not measured for this margin and height yet (with it off, those it raised), for Work in the frames to come.
-		private static void Enqueue(Settings settings, RegrowthState state)
+		public static bool IsDeposit(int prefab)
 		{
-			float margin = settings.CopperOverDeepestHole.Value;
-			int stamp = Stamp(margin, state.CopperRaised);
-			bool any = queue.Count > 0;
-			foreach (ZDO zdo in ZDOMan.instance.m_objectsByID.Values)
+			return prefab == CopperReach.WholeHash || prefab == CopperReach.FracturedHash;
+		}
+
+		/*
+			What a pass's scan found (Regrowth.Pass, over frames): the deposits, the location proxies and the player's building pieces by zone.
+			Those not measured for this margin and height yet (with it off, those it raised) are queued for Work in the frames to come. A batch
+			still going on finishes first; what it leaves is queued at the next pass.
+		*/
+		public static void Collected(List<ZDOID> deposits, Dictionary<Vector2s, (Vector3, Vector3)> proxies, Dictionary<Vector2s, List<Vector3>> pieces)
+		{
+			Settings settings = current;
+			RegrowthState state = currentState;
+			if (settings == null || state == null || ZDOMan.instance == null)
 			{
-				int prefab = zdo.GetPrefab();
-				if (prefab == CopperReach.ProxyHash)
+				return;
+			}
+			CopperReach.SetProxies(proxies);
+			float margin = settings.CopperOverDeepestHole.Value;
+			if (margin >= 0f)
+			{
+				if (!CopperReach.Ready())
 				{
-					CopperReach.NoteProxy(zdo);
+					return;
 				}
-				else if (!any && (prefab == CopperReach.WholeHash || prefab == CopperReach.FracturedHash) && zdo.GetInt(MeasuredHash) != stamp
-					&& (margin >= 0f || zdo.GetFloat(UpHash) != 0f))
+				// A zone generated now needs the locations near it read already.
+				CopperReach.AskAll();
+			}
+			if (batch != null)
+			{
+				builds = pieces;
+				return;
+			}
+			int stamp = Stamp(margin, state.CopperRaised);
+			bool dryRun = settings.DryRun.Value;
+			if (!dryRun || dryStamp != stamp)
+			{
+				dryMeasured.Clear();
+				dryStamp = stamp;
+			}
+			foreach (ZDOID id in deposits)
+			{
+				ZDO zdo = ZDOMan.instance.GetZDO(id);
+				if (zdo == null || !IsDeposit(zdo.GetPrefab()) || zdo.GetInt(MeasuredHash) == stamp || (dryRun && dryMeasured.Contains(id)))
 				{
-					queue.Enqueue(zdo.m_uid);
+					continue;
+				}
+				if (margin >= 0f || zdo.GetFloat(UpHash) != 0f)
+				{
+					queue.Enqueue(id);
 				}
 			}
-			if (!any && queue.Count > 0)
+			if (queue.Count > 0)
 			{
-				batch = new Batch { margin = margin, stamp = stamp, dryRun = settings.DryRun.Value };
-				builds = null;
+				batch = new Batch { margin = margin, stamp = stamp, dryRun = dryRun };
+				builds = pieces;
 			}
 		}
 
 		// A few milliseconds of the deposits queued, every frame (Regrowth.Tick).
-		public static void Work(HashSet<int> piecePrefabs)
+		public static void Work()
 		{
-			if (queue.Count == 0 || batch == null)
+			if (batch == null || ZDOMan.instance == null || !ZNet.instance || !ZNetScene.instance)
 			{
 				return;
 			}
 			System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
-			while (queue.Count > 0 && watch.Elapsed.TotalMilliseconds < WorkMilliseconds)
+			// Each deposit looked at once a frame at most: one waiting for a location to be read goes to the back.
+			int looked = 0, todo = queue.Count;
+			bool done = false;
+			while (queue.Count > 0 && looked < todo && watch.Elapsed.TotalMilliseconds < WorkMilliseconds)
 			{
-				ZDO zdo = ZDOMan.instance.GetZDO(queue.Dequeue());
-				if (zdo != null)
+				looked++;
+				ZDOID id = queue.Dequeue();
+				ZDO zdo = ZDOMan.instance.GetZDO(id);
+				if (zdo == null)
 				{
-					One(zdo, piecePrefabs);
+					continue;
 				}
+				bool waiting = false;
+				// One deposit that cannot be done must not stop the rest of Regrowth's frame (Tick), nor the deposits after it.
+				try
+				{
+					waiting = !One(zdo);
+				}
+				catch (System.Exception e)
+				{
+					if (batch.failed++ == 0)
+					{
+						RegrowthPlugin.Log.LogWarning($"Copper deposit at {zdo.GetPosition()} could not be measured: {e}");
+					}
+				}
+				if (waiting)
+				{
+					queue.Enqueue(id);
+				}
+				else
+				{
+					done = true;
+				}
+			}
+			double spent = watch.Elapsed.TotalMilliseconds;
+			batch.workMilliseconds += spent;
+			batch.worstMilliseconds = System.Math.Max(batch.worstMilliseconds, spent);
+			if (done)
+			{
+				batch.frames++;
+			}
+			else
+			{
+				batch.waitedFrames++;
 			}
 			if (queue.Count == 0)
 			{
 				Report(batch);
-				batch = null;
-				builds = null;
-				CopperReach.Forget();
+				End();
 			}
 		}
 
-		private static void One(ZDO zdo, HashSet<int> piecePrefabs)
+		// False while it waits for a location near to be read.
+		private static bool One(ZDO zdo)
 		{
-			int prefab = zdo.GetPrefab();
-			if (prefab != CopperReach.WholeHash && prefab != CopperReach.FracturedHash)
+			if (!IsDeposit(zdo.GetPrefab()))
 			{
-				return;
+				return true;
 			}
 			if (zdo.GetBool(KeptHash))
 			{
 				batch.kept++;
-				zdo.Set(MeasuredHash, batch.stamp);
-				return;
+				Done(zdo);
+				return true;
 			}
 			Vector3 at = zdo.GetPosition();
-			foreach (ZNetPeer peer in ZNet.instance.GetPeers())
+			if (Loaded(zdo))
 			{
-				if (Utils.DistanceXZ(peer.m_refPos, at) < PlayerRadius)
-				{
-					batch.postponed++;
-					return;
-				}
+				batch.postponed++;
+				return true;
 			}
 			float up = zdo.GetFloat(UpHash, 0f), target = 0f;
 			if (batch.margin >= 0f)
 			{
-				if (!CopperReach.Measure(zdo, batch.margin, up, out float need, out bool byLocation))
+				CopperReach.Result result = CopperReach.Measure(zdo, batch.margin, up, out float need, out bool byLocation);
+				if (result == CopperReach.Result.Waiting)
+				{
+					return false;
+				}
+				if (result == CopperReach.Result.Failed)
 				{
 					batch.failed++;
-					return;
+					return true;
 				}
 				batch.measured++;
 				if (byLocation)
@@ -251,36 +342,66 @@ namespace ResourceRegrowth
 			if (Mathf.Abs(delta) < 0.01f)
 			{
 				batch.enough++;
-				if (!batch.dryRun)
-				{
-					zdo.Set(MeasuredHash, batch.stamp);
-				}
-				return;
+				Done(zdo);
+				return true;
 			}
-			if (delta > 0f && NearBuild(at, builds ?? (builds = Builds(piecePrefabs))))
+			if (delta > 0f && NearBuild(at, builds ?? (builds = new Dictionary<Vector2s, List<Vector3>>())))
 			{
 				batch.kept++;
 				if (!batch.dryRun)
 				{
 					zdo.Set(KeptHash, true);
-					zdo.Set(MeasuredHash, batch.stamp);
 				}
-				return;
+				Done(zdo);
+				return true;
 			}
 			(delta > 0f ? batch.up : batch.down).Add(Mathf.Abs(delta));
+			if (!batch.dryRun)
+			{
+				at.y += delta;
+				Move(zdo, at);
+				zdo.Set(UpHash, target);
+			}
+			Done(zdo);
+			return true;
+		}
+
+		private static void Done(ZDO zdo)
+		{
 			if (batch.dryRun)
 			{
-				return;
+				dryMeasured.Add(zdo.m_uid);
 			}
-			at.y += delta;
-			Move(zdo, at);
-			zdo.Set(UpHash, target);
-			zdo.Set(MeasuredHash, batch.stamp);
+			else
+			{
+				zdo.Set(MeasuredHash, batch.stamp);
+			}
+		}
+
+		/*
+			Whether a player's game may have the deposit loaded: the zones ZDOMan.FindSectorObjects gives a client its objects from (its near
+			simulation distance, the total for a distant object), one zone wider for a player on the move. A client never moves a rock it has
+			loaded, so moved then it would stay where it was for that player and break open there.
+		*/
+		private static bool Loaded(ZDO zdo)
+		{
+			SimulationDistance distance = ZNet.instance.GetSyncedSimulationDistance();
+			int reach = (zdo.Distant ? distance.TotalSimulationDistance : distance.NearSimulationDistance) + 1;
+			Vector2s zone = zdo.GetSector();
+			foreach (ZNetPeer peer in ZNet.instance.GetPeers())
+			{
+				Vector2s at = ZoneSystem.GetZone(peer.GetRefPos());
+				if (Mathf.Abs(at.x - zone.x) <= reach && Mathf.Abs(at.y - zone.y) <= reach)
+				{
+					return true;
+				}
+			}
+			return false;
 		}
 
 		private static void Report(Batch b)
 		{
-			string verb = b.dryRun ? "would be" : "";
+			string verb = b.dryRun ? " would be" : "";
 			string Spread(List<float> list)
 			{
 				list.Sort();
@@ -288,10 +409,12 @@ namespace ResourceRegrowth
 			}
 			RegrowthPlugin.Log.LogInfo(
 				(b.dryRun ? "Dry run: " : "") + $"Copper deposits over the deepest hole ({(b.margin >= 0f ? $"{b.margin:0.##} m" : "off")}, CopperDeposits OverDeepestHole): "
-				+ $"{b.measured} measured, {b.up.Count} {verb} raised{Spread(b.up)}, {b.down.Count} {verb} lowered back{Spread(b.down)}, {b.enough} high enough"
-				+ $"; {b.byLocation} counted from a location's levelled ground, {b.kept} left for a player's building within {BuildRadius:0} m"
-				+ (b.postponed > 0 ? $", {b.postponed} with a player within {PlayerRadius:0} m (at a later pass)" : "")
-				+ (b.failed > 0 ? $", {b.failed} could not be measured" : "") + ".");
+				+ $"{b.measured} measured, {b.up.Count}{verb} raised{Spread(b.up)}, {b.down.Count}{verb} lowered back{Spread(b.down)}, {b.enough} high enough"
+				+ $"; {b.byLocation} on ground a location levels, {b.kept} left for a player's building within {BuildRadius:0} m"
+				+ (b.postponed > 0 ? $", {b.postponed} a player has loaded (at a later pass)" : "")
+				+ (b.failed > 0 ? $", {b.failed} could not be measured" : "")
+				+ $"; {b.workMilliseconds:0} ms of work over {b.frames} frames, the worst {b.worstMilliseconds:0.0} ms"
+				+ (b.waitedFrames > 0 ? $", {b.waitedFrames} frames waiting for locations to be read ({CopperReach.ReadReport()})" : "") + ".");
 		}
 
 		/*
@@ -328,12 +451,15 @@ namespace ResourceRegrowth
 			{
 				return;
 			}
+			System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
 			int stamp = Stamp(margin, currentState.CopperRaised);
 			List<string> done = new List<string>();
 			foreach (ZDO zdo in deposits)
 			{
-				if (!CopperReach.Measure(zdo, margin, 0f, out float need, out bool byLocation))
+				CopperReach.Result result = CopperReach.Measure(zdo, margin, 0f, out float need, out bool byLocation);
+				if (result != CopperReach.Result.Measured)
 				{
+					done.Add(result == CopperReach.Result.Waiting ? "at a later pass (a location near is still being read)" : "not measured");
 					continue;
 				}
 				float target = Mathf.Max(0f, need);
@@ -345,10 +471,10 @@ namespace ResourceRegrowth
 					zdo.Set(UpHash, target);
 				}
 				zdo.Set(MeasuredHash, stamp);
-				done.Add($"{target:0.0} m" + (byLocation ? " (location's ground)" : ""));
+				done.Add((target >= 0.01f ? $"{target:0.0} m" : "none") + (byLocation ? " (on ground a location levels)" : ""));
 			}
 			CopperReach.Forget();
-			RegrowthPlugin.Log.LogInfo($"Copper deposits in the new zone {zone.x},{zone.y}: raised {string.Join(", ", done)} more, for all of each to reach {margin:0.##} m over the deepest hole.");
+			RegrowthPlugin.Log.LogInfo($"Copper deposits in the new zone {zone.x},{zone.y}, raised by what each needs for every piece to reach {margin:0.##} m over the deepest hole: {string.Join(", ", done)} ({watch.Elapsed.TotalMilliseconds:0.0} ms).");
 		}
 
 		private static Dictionary<Vector2s, List<Vector3>> Builds(HashSet<int> piecePrefabs)
@@ -356,17 +482,27 @@ namespace ResourceRegrowth
 			Dictionary<Vector2s, List<Vector3>> builds = new Dictionary<Vector2s, List<Vector3>>();
 			foreach (ZDO zdo in ZDOMan.instance.m_objectsByID.Values)
 			{
-				if (zdo.GetLong(ZDOVars.s_creator, 0L) != 0L && piecePrefabs.Contains(zdo.GetPrefab()) && zdo.GetPosition().y < 3000f)
+				if (zdo.GetLong(ZDOVars.s_creator, 0L) != 0L && piecePrefabs.Contains(zdo.GetPrefab()))
 				{
-					Vector2s zone = ZoneSystem.GetZone(zdo.GetPosition());
-					if (!builds.TryGetValue(zone, out List<Vector3> list))
-					{
-						builds[zone] = list = new List<Vector3>();
-					}
-					list.Add(zdo.GetPosition());
+					NoteBuild(builds, zdo.GetPosition());
 				}
 			}
 			return builds;
+		}
+
+		// A player's building piece, by its zone (one in a dungeon, thousands of metres up, does not count).
+		public static void NoteBuild(Dictionary<Vector2s, List<Vector3>> builds, Vector3 at)
+		{
+			if (at.y >= 3000f)
+			{
+				return;
+			}
+			Vector2s zone = ZoneSystem.GetZone(at);
+			if (!builds.TryGetValue(zone, out List<Vector3> list))
+			{
+				builds[zone] = list = new List<Vector3>();
+			}
+			list.Add(at);
 		}
 
 		private static bool NearBuild(Vector3 at, Dictionary<Vector2s, List<Vector3>> builds)
