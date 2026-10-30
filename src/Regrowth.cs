@@ -142,6 +142,12 @@ namespace ResourceRegrowth
 						: "LocationObjects: switched on after the server started; until a restart a piece put back that falls is put back again (the game method that tells is patched at startup only).");
 				}
 			}
+			if (settings.CopperOverDeepestHole.Value >= 0f && !RegrowthPlugin.SpawnZonePatched)
+			{
+				RegrowthPlugin.Log.LogWarning(RegrowthPlugin.SpawnZonePatchFailed
+					? "CopperDeposits OverDeepestHole: ZoneSystem.SpawnZone could not be patched at startup (see the error above); a deposit of a zone generated now is raised at the next pass, once no player is near."
+					: "CopperDeposits OverDeepestHole: switched on after the server started; until a restart a deposit of a zone generated now is raised at the next pass, once no player is near.");
+			}
 			if (settings.ZonesEnabled.Value)
 			{
 				if (RegrowthPlugin.SpawnLocationPatched)
@@ -172,6 +178,7 @@ namespace ResourceRegrowth
 				running = null;
 			}
 			zones?.Stop();
+			CopperDeposits.Stop();
 			if (ZDOMan.instance != null)
 			{
 				ZDOMan.instance.m_onZDODestroyed -= OnDestroyed;
@@ -185,6 +192,7 @@ namespace ResourceRegrowth
 
 		public void Tick(float dt)
 		{
+			CopperDeposits.Work(piecePrefabs);
 			presenceTimer -= dt;
 			if (presenceTimer <= 0f)
 			{

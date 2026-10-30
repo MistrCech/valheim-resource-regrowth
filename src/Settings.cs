@@ -31,6 +31,7 @@ namespace ResourceRegrowth
 		public readonly ConfigEntry<string> ChestsExclude;
 		public readonly ConfigEntry<bool> ChestsKeepPlayersItems;
 		public readonly ConfigEntry<float> CopperRaiseMeters;
+		public readonly ConfigEntry<float> CopperOverDeepestHole;
 
 		public readonly ConfigEntry<bool> SpawnersEnabled;
 		public readonly ConfigEntry<float> SpawnersAfterHours;
@@ -125,6 +126,9 @@ namespace ResourceRegrowth
 			CopperRaiseMeters = config.Bind("CopperDeposits", "RaiseMeters", 0f,
 				new ConfigDescription("Metres higher than the game puts copper deposits, in zones still to be generated and on the deposits that stand (not one broken open or within 20 m of a player's building). The game sinks them so far that a median of 46 of a deposit's 130 pieces reach over the ground, the worst 18; 4 m: 88, the worst 62, and the rock up to 6 m tall. Back to 0 puts them back. Read at every pass.",
 					new AcceptableValueRange<float>(0f, 8f)));
+			CopperOverDeepestHole = config.Bind("CopperDeposits", "OverDeepestHole", -1f,
+				new ConfigDescription("Metres every piece of a copper deposit reaches over the deepest hole a pickaxe can dig around it (8 m under the ground as the game made it, a location's levelling included): each deposit stands that much higher than RaiseMeters puts it, by what it needs itself, so a player who digs it out leaves no copper in the ground. The game sinks the rock (17 m tall) so deep that even 4 m higher most deposits keep pieces nobody can reach, most on slopes; 0.5 is enough for a swing. A deposit within 200 m of a player waits for a later pass; one within 20 m of a player's building stays. -1: off, and what it raised goes back down. Read at every pass; new zones need it on at startup.",
+					new AcceptableValueRange<float>(-1f, 4f)));
 
 			ZonesEnabled = config.Bind("Zones", "Enabled", false,
 				"Generate a zone players have been in again, as the world first made it, once nobody has been near it for IdleHours: trees, rocks, ore deposits, bushes, pickables, the location with its buildings, chests, creatures and dungeon, and the ground -- as if no player had ever been there. Never a zone with a workbench in it or within PlayerBuildRadius (a base), never a protected location. Players' things elsewhere stay where they are (pieces, tombstones, ships, carts, items they carried, tamed creatures, chests and stands holding something of theirs); fields, roads and trees they planted go with the reset unless a workbench is near. Unlike the rest this deletes and creates objects, so it is off until switched on. Needs a restart.");
