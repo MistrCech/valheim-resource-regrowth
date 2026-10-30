@@ -110,9 +110,11 @@ portal or a ladder, keeps back what is on the surface there, which then has no s
 the interior comes back whole. A build or a tombstone inside holds everything. A piece that fell after being put back
 and an object whose holder is gone stay away by themselves: they neither make the location due nor hold it back.
 
-The decisions run over frames, as the scan does: on a world of 864,000 objects a scan takes 570-830 ms of work over
-about 320 frames, the worst of them 9-23 ms (35-40 ms in the first pass after a start, which also reads the layouts).
-The same decisions taken in one frame cost 430-500 ms on that world. A location's layout is read in one frame: listing the
+The decisions run over frames, as the scan does: on a world of 864,000 objects and a Ryzen 9 7900X3D a scan takes
+570-830 ms of work over about 320 frames, the worst of them 9-23 ms (35-40 ms in the first pass after a start, which also
+reads the layouts). The same decisions taken in one frame cost 430-500 ms on that world. On a live server, a Windows VM on
+an EPYC host, the same world takes about three times as long: 2.0-2.1 s of work over 530 frames, the worst 23-40 ms.
+A location's layout is read in one frame: listing the
 Ashlands ruins (`Charred*`) makes that frame 137 ms, as CharredRuins1 has 6 places on that world.
 
 ### Boss items
