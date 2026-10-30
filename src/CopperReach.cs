@@ -26,9 +26,14 @@ namespace ResourceRegrowth
 		  both ways, which for the game's pointwise and rising level and smooth is the higher of the ground with and without it, in order;
 		- a location's turn: its proxy's as the game sends it, and as the world's save keeps it (ZDO.Save rounds the Euler angles down to the half
 		  degree: 225 comes back as 224.5); one not placed yet in each turn PlaceLocations can give it, both ways, standing on the ground where its
-		  ray will meet it (the water's level for one snapped to it).
-		Locations whose reach overlaps under a deposit are turned together, every pairing of their turns; the others each on their own.
-		A location's prefab is read once, in the background (a frame each), for its modifiers; a deposit near one not read yet waits for it.
+		  ray will meet it (the water's level for one snapped to it). The proxy is the one in the location's zone among the world's objects.
+		Locations whose reach overlaps under a deposit are turned together, every pairing of their turns while that is little work; past it
+		(locations not placed yet, side by side), every modifier of every turn counts as one that may not be there, in the game's order: never
+		under any pairing, since level and smooth only rise with the ground they are given. The others each on their own.
+		The deposit's own turn counts both ways too: one generated since the server started has its exact turn until the next restart, the
+		saved one after it, its pieces up to 0.12 m off at the rim.
+		A location's prefab is read once, in the background (a frame each), for its modifiers; a deposit near one not read yet waits for it, and
+		one that could not be read is tried again at the next pass.
 	*/
 	internal static class CopperReach
 	{
@@ -38,8 +43,9 @@ namespace ResourceRegrowth
 		public static readonly int ProxyHash = "LocationProxy".GetStableHashCode();
 		// How many zones round a deposit's own a location's modifiers are looked for in (the widest reach about 40 m).
 		private const int LocationZones = 2;
-		// The pairings of turns of locations reaching under one deposit together: more is not measured.
-		private const int MaxPairings = 4096;
+		// The pairings of turns times the modifiers of locations reaching under one deposit together, worked out exactly: about 10 ms at most
+		// (a test sets it lower). More is taken at the highest each can be.
+		private static int exactWork = 256;
 		private const int MaxCachedVertices = 1 << 18;
 
 		public enum Result { Measured, Waiting, Failed }
@@ -69,6 +75,7 @@ namespace ResourceRegrowth
 		{
 			public Vector3 at;
 			public Modifier modifier;
+			public bool maybe; // one turn of several taken at once (Bound)
 		}
 
 		private static List<Vector3[]> pieces;
@@ -82,13 +89,18 @@ namespace ResourceRegrowth
 		private static readonly Dictionary<ZoneSystem.ZoneLocation, List<Modifier>> modifiers = new Dictionary<ZoneSystem.ZoneLocation, List<Modifier>>();
 		private static readonly Queue<ZoneSystem.ZoneLocation> toRead = new Queue<ZoneSystem.ZoneLocation>();
 		private static readonly HashSet<ZoneSystem.ZoneLocation> asked = new HashSet<ZoneSystem.ZoneLocation>();
+		// Those that could not be read, asked again at the next pass; and those already warned of.
+		private static readonly List<ZoneSystem.ZoneLocation> unread = new List<ZoneSystem.ZoneLocation>();
+		private static readonly HashSet<ZoneSystem.ZoneLocation> warned = new HashSet<ZoneSystem.ZoneLocation>();
 		private static MonoBehaviour host;
 		private static Coroutine reader;
 		private static ZoneSystem.ZoneLocation reading;
 		private static int readCount, readFailed;
 		private static double readMilliseconds;
-		// Each placed location's own position and turn (Euler angles as its ZDO keeps them), by its zone (its LocationProxy: one location a zone).
-		private static Dictionary<Vector2s, (Vector3 position, Vector3 euler)> proxies = new Dictionary<Vector2s, (Vector3, Vector3)>();
+		// A placed location's LocationProxy by its zone (one location a zone), as found for one batch; ZDOID.None: none there.
+		private static readonly Dictionary<Vector2s, ZDOID> proxyOf = new Dictionary<Vector2s, ZDOID>();
+		// The last Measure took a group of locations at the highest each can be (Bound).
+		public static bool LastBound { get; private set; }
 		private static readonly List<Vector3> world = new List<Vector3>();
 		private static readonly List<int> ends = new List<int>();
 		private static readonly List<NearLocation> near = new List<NearLocation>();
@@ -99,22 +111,12 @@ namespace ResourceRegrowth
 			host = by;
 		}
 
-		public static void NoteProxy(ZDO zdo)
-		{
-			proxies[ZoneSystem.GetZone(zdo.GetPosition())] = (zdo.GetPosition(), zdo.m_rotation);
-		}
-
-		// The proxies a pass found, for the deposits it queues: a zone generated again since is found anew.
-		public static void SetProxies(Dictionary<Vector2s, (Vector3, Vector3)> found)
-		{
-			proxies = found;
-		}
-
-		// The ground worked out for one batch of deposits; worked out again when needed.
+		// The ground and the proxies worked out for one batch of deposits; worked out again when needed.
 		public static void Forget()
 		{
 			corners.Clear();
 			heights.Clear();
+			proxyOf.Clear();
 		}
 
 		public static void Reset()
@@ -132,12 +134,10 @@ namespace ResourceRegrowth
 			toRead.Clear();
 			asked.Clear();
 			modifiers.Clear();
-			proxies = new Dictionary<Vector2s, (Vector3, Vector3)>();
+			unread.Clear();
+			warned.Clear();
 			Forget();
 		}
-
-		// Locations are read one at a time in the background; Busy while any is left.
-		public static bool Busy => reader != null;
 
 		public static string ReadReport()
 		{
@@ -204,6 +204,7 @@ namespace ResourceRegrowth
 		{
 			need = 0f;
 			byLocation = false;
+			LastBound = false;
 			if (!Ready())
 			{
 				return Result.Failed;
@@ -216,7 +217,8 @@ namespace ResourceRegrowth
 				return nearby;
 			}
 			bool fractured = zdo.GetPrefab() == FracturedHash;
-			Quaternion rotation = zdo.GetRotation();
+			// Its turn as the game has it now and as the world's save brings it back: each piece must reach in both.
+			Vector3 euler = zdo.m_rotation, saved = Saved(euler);
 			Vector3 size = zdo.GetVec3(ZDOVars.s_scaleHash, Vector3.zero);
 			if (size == Vector3.zero)
 			{
@@ -226,22 +228,26 @@ namespace ResourceRegrowth
 			world.Clear();
 			ends.Clear();
 			float minX = float.MaxValue, maxX = float.MinValue, minZ = float.MaxValue, maxZ = float.MinValue;
-			for (int a = 0; a < pieces.Count; a++)
+			for (int turn = 0; turn < (saved == euler ? 1 : 2); turn++)
 			{
-				if (health != null && a < health.Length && health[a] <= 0f)
+				Quaternion rotation = Quaternion.Euler(turn == 0 ? euler : saved);
+				for (int a = 0; a < pieces.Count; a++)
 				{
-					continue;
+					if (health != null && a < health.Length && health[a] <= 0f)
+					{
+						continue;
+					}
+					foreach (Vector3 v in pieces[a])
+					{
+						Vector3 w = position + rotation * Vector3.Scale(size, v);
+						world.Add(w);
+						minX = Mathf.Min(minX, w.x);
+						maxX = Mathf.Max(maxX, w.x);
+						minZ = Mathf.Min(minZ, w.z);
+						maxZ = Mathf.Max(maxZ, w.z);
+					}
+					ends.Add(world.Count);
 				}
-				foreach (Vector3 v in pieces[a])
-				{
-					Vector3 w = position + rotation * Vector3.Scale(size, v);
-					world.Add(w);
-					minX = Mathf.Min(minX, w.x);
-					maxX = Mathf.Max(maxX, w.x);
-					minZ = Mathf.Min(minZ, w.z);
-					maxZ = Mathf.Max(maxZ, w.z);
-				}
-				ends.Add(world.Count);
 			}
 			if (world.Count == 0)
 			{
@@ -259,9 +265,13 @@ namespace ResourceRegrowth
 				}
 			}
 			float[] floor = Levelled(raw, x0, z0, nx, nz, out byLocation);
-			if (floor == null)
+			foreach (float h in floor)
 			{
-				return Result.Failed;
+				// A modifier the game itself could not apply (a smooth of no radius, another mod's): nothing is moved by it.
+				if (float.IsNaN(h) || float.IsInfinity(h))
+				{
+					return Result.Failed;
+				}
 			}
 			need = float.MinValue;
 			int start = 0;
@@ -364,7 +374,7 @@ namespace ResourceRegrowth
 
 		/*
 			The ground under the deposit once the locations near have levelled it: of every turn and every modifier there or not, the highest
-			it can be at each vertex. Null when too many turns would have to be paired.
+			it can be at each vertex.
 		*/
 		private static float[] Levelled(float[] raw, int x0, int z0, int nx, int nz, out bool byLocation)
 		{
@@ -435,50 +445,18 @@ namespace ResourceRegrowth
 					continue;
 				}
 				together.Clear();
-				long pairings = 1;
+				long pairings = 1, modifiersOf = 0;
 				for (int a = 0; a < near.Count; a++)
 				{
 					if (Root(a) == g)
 					{
 						together.Add(near[a]);
-						pairings *= near[a].turns.Count;
+						// Only compared with exactWork: it stops growing well past it.
+						pairings = pairings > int.MaxValue ? pairings : pairings * near[a].turns.Count;
+						modifiersOf += near[a].modifiers.Count;
 					}
 				}
-				if (pairings > MaxPairings)
-				{
-					return null;
-				}
-				float[] highest = null;
-				for (long pairing = 0; pairing < pairings; pairing++)
-				{
-					placed.Clear();
-					long rest = pairing;
-					foreach (NearLocation location in together)
-					{
-						Turn turn = location.turns[(int)(rest % location.turns.Count)];
-						rest /= location.turns.Count;
-						foreach (Modifier m in location.modifiers)
-						{
-							placed.Add(new Placed { at = turn.position + turn.rotation * m.offset, modifier = m });
-						}
-					}
-					// Heightmap.ApplyModifiers in TerrainModifier.GetAllInstances' order: by sort order, then (no creation time on a location's own) by the distance from the world's centre.
-					placed.Sort((a, b) => a.modifier.sortOrder != b.modifier.sortOrder ? a.modifier.sortOrder.CompareTo(b.modifier.sortOrder) : a.at.sqrMagnitude.CompareTo(b.at.sqrMagnitude));
-					float[] grid = (float[])raw.Clone();
-					foreach (Placed p in placed)
-					{
-						Apply(grid, x0, z0, nx, nz, p);
-					}
-					if (highest == null)
-					{
-						highest = grid;
-						continue;
-					}
-					for (int k = 0; k < highest.Length; k++)
-					{
-						highest[k] = Mathf.Max(highest[k], grid[k]);
-					}
-				}
+				float[] highest = pairings == 1 || pairings * modifiersOf <= exactWork ? Paired(raw, x0, z0, nx, nz, together, pairings) : Bound(raw, x0, z0, nx, nz, together);
 				// The group's own vertices only: another group's are its own.
 				foreach (NearLocation location in together)
 				{
@@ -496,6 +474,76 @@ namespace ResourceRegrowth
 				byLocation |= Mathf.Abs(best[k] - raw[k]) > 0.01f;
 			}
 			return best;
+		}
+
+		// Every pairing of the group's turns, each with its modifiers in the game's order: the highest the ground comes out at each vertex.
+		private static float[] Paired(float[] raw, int x0, int z0, int nx, int nz, List<NearLocation> together, long pairings)
+		{
+			float[] highest = null;
+			for (long pairing = 0; pairing < pairings; pairing++)
+			{
+				placed.Clear();
+				long rest = pairing;
+				foreach (NearLocation location in together)
+				{
+					Turn turn = location.turns[(int)(rest % location.turns.Count)];
+					rest /= location.turns.Count;
+					foreach (Modifier m in location.modifiers)
+					{
+						placed.Add(new Placed { at = turn.position + turn.rotation * m.offset, modifier = m });
+					}
+				}
+				placed.Sort(GameOrder);
+				float[] grid = (float[])raw.Clone();
+				foreach (Placed p in placed)
+				{
+					Apply(grid, x0, z0, nx, nz, p);
+				}
+				if (highest == null)
+				{
+					highest = grid;
+					continue;
+				}
+				for (int k = 0; k < highest.Length; k++)
+				{
+					highest[k] = Mathf.Max(highest[k], grid[k]);
+				}
+			}
+			return highest;
+		}
+
+		/*
+			Too many turns to pair: every modifier of every turn as one that may not be there, all in the game's order. In any one pairing its
+			modifiers come in that same order, and level and smooth give no lower ground for higher ground given, so what this leaves is never
+			under what that pairing leaves.
+		*/
+		private static float[] Bound(float[] raw, int x0, int z0, int nx, int nz, List<NearLocation> together)
+		{
+			LastBound = true;
+			placed.Clear();
+			foreach (NearLocation location in together)
+			{
+				foreach (Turn turn in location.turns)
+				{
+					foreach (Modifier m in location.modifiers)
+					{
+						placed.Add(new Placed { at = turn.position + turn.rotation * m.offset, modifier = m, maybe = true });
+					}
+				}
+			}
+			placed.Sort(GameOrder);
+			float[] grid = (float[])raw.Clone();
+			foreach (Placed p in placed)
+			{
+				Apply(grid, x0, z0, nx, nz, p);
+			}
+			return grid;
+		}
+
+		// Heightmap.ApplyModifiers in TerrainModifier.GetAllInstances' order: by sort order, then (no creation time on a location's own) by the distance from the world's centre.
+		private static int GameOrder(Placed a, Placed b)
+		{
+			return a.modifier.sortOrder != b.modifier.sortOrder ? a.modifier.sortOrder.CompareTo(b.modifier.sortOrder) : a.at.sqrMagnitude.CompareTo(b.at.sqrMagnitude);
 		}
 
 		/*
@@ -557,7 +605,7 @@ namespace ResourceRegrowth
 					}
 					if (touched)
 					{
-						grid[i * nx + j] = m.maybe ? Mathf.Max(h, changed) : changed;
+						grid[i * nx + j] = m.maybe || p.maybe ? Mathf.Max(h, changed) : changed;
 					}
 				}
 			}
@@ -597,9 +645,10 @@ namespace ResourceRegrowth
 						continue;
 					}
 					NearLocation location = new NearLocation { modifiers = list };
-					if (instance.m_placed && proxies.TryGetValue(z, out var proxy))
+					ZDO proxy = instance.m_placed ? Proxy(z) : null;
+					if (proxy != null)
 					{
-						AddTurns(location, proxy.position, proxy.euler);
+						AddTurns(location, proxy.GetPosition(), proxy.m_rotation);
 					}
 					else
 					{
@@ -618,6 +667,29 @@ namespace ResourceRegrowth
 				}
 			}
 			return waiting ? Result.Waiting : unreadable ? Result.Failed : Result.Measured;
+		}
+
+		// The LocationProxy among the zone's objects (ZDOMan's own list of them), once a batch; null if there is none.
+		private static ZDO Proxy(Vector2s zone)
+		{
+			if (!proxyOf.TryGetValue(zone, out ZDOID id))
+			{
+				id = ZDOID.None;
+				List<ZDO> objects = Math.Abs(zone.x) < 256 && Math.Abs(zone.y) < 256 ? ZDOMan.instance.m_objectsBySector[ZoneSystem.SectorToIndex(zone).Sector] : null;
+				if (objects != null)
+				{
+					foreach (ZDO zdo in objects)
+					{
+						if (zdo.GetPrefab() == ProxyHash)
+						{
+							id = zdo.m_uid;
+							break;
+						}
+					}
+				}
+				proxyOf[zone] = id;
+			}
+			return id == ZDOID.None ? null : ZDOMan.instance.GetZDO(id);
 		}
 
 		// As the game sends the turn, and as the world's save brings it back (ZPackage.WriteSmallRotation and ReadSmallRotation).
@@ -643,8 +715,8 @@ namespace ResourceRegrowth
 			{
 				return new Vector3(0f, (float)(y & 0x7FFF) * 0.5f, 0f);
 			}
-			// Tilted (not a location the game placed): as it is.
-			return euler;
+			// Tilted: each angle in ten bits.
+			return new Vector3((float)(x & 0x3FF), (float)(y & 0x3FF), (float)(z & 0x3FF)) * 0.5f;
 		}
 
 		private static void Ask(ZoneSystem.ZoneLocation location)
@@ -667,6 +739,13 @@ namespace ResourceRegrowth
 			{
 				return;
 			}
+			// One that could not be read is tried again (a load that timed out may go through now).
+			foreach (ZoneSystem.ZoneLocation location in unread)
+			{
+				modifiers.Remove(location);
+				asked.Remove(location);
+			}
+			unread.Clear();
 			foreach (ZoneSystem.LocationInstance instance in ZoneSystem.instance.m_locationInstances.Values)
 			{
 				if (instance.m_location != null)
@@ -686,26 +765,47 @@ namespace ResourceRegrowth
 					modifiers[location] = new List<Modifier>();
 					continue;
 				}
-				bool loaded = false;
+				bool loaded = false, threw = false;
+				string why = "it did not load";
 				reading = location;
 				IEnumerator load = LocationObjects.LoadAsync(location.m_prefab, ok => loaded = ok);
-				while (load.MoveNext())
+				while (true)
 				{
+					// A throw here would end the reader for good, and every deposit near the location would wait for it.
+					bool more;
+					try
+					{
+						more = load.MoveNext();
+					}
+					catch (Exception e)
+					{
+						more = false;
+						threw = true;
+						why = e.Message;
+					}
+					if (!more)
+					{
+						break;
+					}
 					yield return null;
 				}
 				System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
 				try
 				{
-					modifiers[location] = loaded ? Extract(location.m_prefab.Asset) : null;
+					modifiers[location] = loaded && !threw ? Extract(location.m_prefab.Asset) : null;
 				}
 				catch (Exception e)
 				{
 					modifiers[location] = null;
-					RegrowthPlugin.Log.LogWarning($"CopperDeposits OverDeepestHole: the ground of location {location.m_prefabName} could not be read: {e.Message}");
+					why = e.Message;
 				}
 				finally
 				{
-					location.m_prefab.Release();
+					// A load that threw may not hold the reference: releasing it then could unload the prefab under the game.
+					if (!threw)
+					{
+						location.m_prefab.Release();
+					}
 					reading = null;
 				}
 				readMilliseconds += watch.Elapsed.TotalMilliseconds;
@@ -713,7 +813,11 @@ namespace ResourceRegrowth
 				if (modifiers[location] == null)
 				{
 					readFailed++;
-					RegrowthPlugin.Log.LogWarning($"CopperDeposits OverDeepestHole: location {location.m_prefabName} could not be loaded; the deposits near one are not measured.");
+					unread.Add(location);
+					if (warned.Add(location))
+					{
+						RegrowthPlugin.Log.LogWarning($"CopperDeposits OverDeepestHole: location {location.m_prefabName} could not be read ({why}); the deposits near one are measured once it can be, tried again at each pass.");
+					}
 				}
 				yield return null;
 			}

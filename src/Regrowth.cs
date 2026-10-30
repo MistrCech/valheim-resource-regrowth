@@ -440,9 +440,8 @@ namespace ResourceRegrowth
 				Dictionary<Vector2s, List<ZDO>> remains = new Dictionary<Vector2s, List<ZDO>>();
 				// What the world generated that can hold a location object up (LocationObjects.Holds, no creator), by zone.
 				Dictionary<Vector2s, List<ZDO>> worldPieces = new Dictionary<Vector2s, List<ZDO>>();
-				// For CopperDeposits: its deposits, the location proxies (position, Euler angles) and the player's building pieces by zone.
+				// For CopperDeposits: its deposits and the player's building pieces by zone.
 				List<ZDOID> copperDeposits = new List<ZDOID>();
-				Dictionary<Vector2s, (Vector3, Vector3)> copperProxies = new Dictionary<Vector2s, (Vector3, Vector3)>();
 				Dictionary<Vector2s, List<Vector3>> copperBuilds = new Dictionary<Vector2s, List<Vector3>>();
 
 				// 1. One pass over every object: note player builds and tombstones, collect candidates.
@@ -473,10 +472,6 @@ namespace ResourceRegrowth
 					if (CopperDeposits.IsDeposit(prefab))
 					{
 						copperDeposits.Add(zdo.m_uid);
-					}
-					else if (prefab == CopperReach.ProxyHash)
-					{
-						copperProxies[ZoneSystem.GetZone(zdo.GetPosition())] = (zdo.GetPosition(), zdo.m_rotation);
 					}
 					if (generatorPrefabs.Contains(prefab))
 					{
@@ -549,7 +544,7 @@ namespace ResourceRegrowth
 				{
 					yield break;
 				}
-				CopperDeposits.Collected(copperDeposits, copperProxies, copperBuilds);
+				CopperDeposits.Collected(copperDeposits, copperBuilds);
 				// From the objects themselves, so what a restart forgot is found again.
 				unsettled = stillUnsettled;
 				// Where location objects stood: new locations and rooms only, at most one prefab read per frame.
