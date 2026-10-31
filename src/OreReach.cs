@@ -6,22 +6,23 @@ using UnityEngine;
 namespace ResourceRegrowth
 {
 	/*
-		How much higher a copper deposit must stand for every piece of it to reach over the deepest hole a player can dig around it
-		([CopperDeposits] OverDeepestHole). From the game (1.0.20):
+		How much higher a deposit must stand for every piece of it to reach over the deepest hole a player can dig around it ([CopperDeposits]
+		and [SilverVeins] OverDeepestHole), and how much higher a silver vein can stand before any of it comes out of the ground ([SilverVeins]
+		UnderGround). From the game (1.0.20):
 		- TerrainComp.ApplyToHeightmap keeps every vertex of the ground within 8 m of its height before players changed anything: the ground as
 		  HeightmapBuilder generates it with the locations' own TerrainModifiers applied (Heightmap.ApplyModifiers copies the heights for
 		  TerrainComp after them). A pickaxe (digg_v3) takes 0.5 m a hit.
 		- A swing hits only what each of its rays meets first (Attack.DoMeleeAttack), and a pickaxe's swing whose topmost hit is ground digs
 		  instead: a piece wholly under the ground cannot be hit.
 		- rock4_copper is a Destructible that the first hit swaps for rock4_copper_frac (MineRock5) at its position, rotation and scale; the 130
-		  pieces are mesh colliders, 13 609 vertices in all.
+		  pieces are mesh colliders, 13 609 vertices in all. A silver vein is made the same way: silvervein, swapped for silvervein_frac.
 		A piece reaches over the hole when one of its vertices stands over the floor at its own x and z. The floor between the ground's vertices
 		is the terrain collider's (Heightmap.RebuildCollisionMesh: two triangles a square, split from x+1,z to x,z+1). The ground's vertices are
 		worked out here as HeightmapBuilder.Build does it (a zone's four corner biomes, DUtils.SmoothStep and Lerp), in the frame that needs them:
 		waiting for the game's builder thread cost a frame up to half a second.
 		A location's TerrainModifiers are done again here as the game does them (level, then smooth, in TerrainModifier.SortByModifiers' order:
 		sort order, then the distance from the world's centre, a location's own having no creation time) on the ground's vertices under the
-		deposit, in the heightmap's own frame. The highest ground any of them can leave counts:
+		deposit, in the heightmap's own frame. The highest ground any of them can leave counts for the hole:
 		- one that may not be there (under a RandomSpawn or its OffObject, a RandomObject or one of its objects, or a networked object) counts
 		  both ways, which for the game's pointwise and rising level and smooth is the higher of the ground with and without it, in order;
 		- a location's turn: its proxy's as the game sends it, and as the world's save keeps it (ZDO.Save rounds the Euler angles down to the half
@@ -30,16 +31,16 @@ namespace ResourceRegrowth
 		Locations whose reach overlaps under a deposit are turned together, every pairing of their turns while that is little work; past it
 		(locations not placed yet, side by side), every modifier of every turn counts as one that may not be there, in the game's order: never
 		under any pairing, since level and smooth only rise with the ground they are given. The others each on their own.
+		The ground a silver vein must stay under is the lowest they can leave, worked out the same way the other way round: the lower of with and
+		without one that may not be there, the lowest of every pairing, and past it the bound that is never over any pairing.
 		The deposit's own turn counts both ways too: one generated since the server started has its exact turn until the next restart, the
 		saved one after it, its pieces up to 0.12 m off at the rim.
 		A location's prefab is read once, in the background (a frame each), for its modifiers; a deposit near one not read yet waits for it, and
 		one that could not be read is tried again at the next pass.
 	*/
-	internal static class CopperReach
+	internal static class OreReach
 	{
-		public const string Whole = "rock4_copper", Fractured = "rock4_copper_frac";
 		public const float DigDepth = 8f;
-		public static readonly int WholeHash = Whole.GetStableHashCode(), FracturedHash = Fractured.GetStableHashCode();
 		public static readonly int ProxyHash = "LocationProxy".GetStableHashCode();
 		// How many zones round a deposit's own a location's modifiers are looked for in (the widest reach about 40 m).
 		private const int LocationZones = 2;
@@ -49,9 +50,32 @@ namespace ResourceRegrowth
 		private const int MaxCachedVertices = 1 << 18;
 		// FollowSlope leaves a deposit as the game turned it on ground flatter than this, in degrees. The game places copper on slopes of 5 to 45
 		// degrees and tilts it at random by up to 5 itself (ZoneVegetation m_minTilt, m_maxTilt, m_randTilt); FollowSlope keeps that tilt on top.
+		// It stands silver veins upright on slopes of up to 30 degrees.
 		public const float MinTilt = 2f;
 
 		public enum Result { Measured, Waiting, Failed }
+
+		// A kind of deposit: the one the world generates whole, and the one the first hit swaps it for, whose pieces are mined.
+		public sealed class Shape
+		{
+			public readonly string Whole, Fractured, Section;
+			public readonly int WholeHash, FracturedHash;
+			public List<Vector3[]> pieces;
+			public float wholeScale, fracturedScale;
+			public bool failed;
+
+			public Shape(string whole, string fractured, string section)
+			{
+				Whole = whole;
+				Fractured = fractured;
+				Section = section;
+				WholeHash = whole.GetStableHashCode();
+				FracturedHash = fractured.GetStableHashCode();
+			}
+		}
+
+		public static readonly Shape Copper = new Shape("rock4_copper", "rock4_copper_frac", "CopperDeposits");
+		public static readonly Shape Silver = new Shape("silvervein", "silvervein_frac", "SilverVeins");
 
 		private sealed class Modifier
 		{
@@ -81,11 +105,8 @@ namespace ResourceRegrowth
 			public bool maybe; // one turn of several taken at once (Bound)
 		}
 
-		private static List<Vector3[]> pieces;
-		private static float wholeScale, fracturedScale;
 		private static int width;
 		private static float scale;
-		private static bool failed;
 		private static readonly Dictionary<Vector2s, Heightmap.Biome[]> corners = new Dictionary<Vector2s, Heightmap.Biome[]>();
 		private static readonly Dictionary<long, float> heights = new Dictionary<long, float>();
 		// A location's modifiers once its prefab was read; null when it could not be.
@@ -147,28 +168,28 @@ namespace ResourceRegrowth
 			return $"{readCount} location prefab(s) read for their ground ({readMilliseconds:0} ms of work{(readFailed > 0 ? $", {readFailed} could not be read" : "")})";
 		}
 
-		public static bool Ready()
+		public static bool Ready(Shape shape)
 		{
-			if (pieces != null)
+			if (shape.pieces != null)
 			{
 				return true;
 			}
-			if (failed)
+			if (shape.failed)
 			{
 				return false;
 			}
-			failed = true;
-			GameObject whole = ZNetScene.instance ? ZNetScene.instance.GetPrefab(Whole) : null;
-			GameObject fractured = ZNetScene.instance ? ZNetScene.instance.GetPrefab(Fractured) : null;
+			shape.failed = true;
+			GameObject whole = ZNetScene.instance ? ZNetScene.instance.GetPrefab(shape.Whole) : null;
+			GameObject fractured = ZNetScene.instance ? ZNetScene.instance.GetPrefab(shape.Fractured) : null;
 			Heightmap template = ZoneSystem.instance ? ZoneSystem.instance.m_zonePrefab.GetComponentInChildren<Heightmap>() : null;
 			if (!whole || !fractured || !template)
 			{
-				RegrowthPlugin.Log.LogWarning($"CopperDeposits OverDeepestHole: no {(!whole ? Whole : !fractured ? Fractured : "heightmap")} in the game; deposits stay where they are.");
+				RegrowthPlugin.Log.LogWarning($"{shape.Section} OverDeepestHole: no {(!whole ? shape.Whole : !fractured ? shape.Fractured : "heightmap")} in the game; they stay where they are.");
 				return false;
 			}
 			if (template.m_scale != 1f || template.m_width % 2 != 0 || template.IsDistantLod)
 			{
-				RegrowthPlugin.Log.LogWarning($"CopperDeposits OverDeepestHole: the ground's vertices are not 1 m apart ({template.m_width} by {template.m_scale}{(template.IsDistantLod ? ", distant" : "")}); deposits stay where they are.");
+				RegrowthPlugin.Log.LogWarning($"{shape.Section} OverDeepestHole: the ground's vertices are not 1 m apart ({template.m_width} by {template.m_scale}{(template.IsDistantLod ? ", distant" : "")}); they stay where they are.");
 				return false;
 			}
 			// MineRock5.Awake takes its pieces as GetComponentsInChildren<Collider>(): the same list, in the same order as the health it keeps.
@@ -179,7 +200,7 @@ namespace ResourceRegrowth
 				MeshCollider mesh = collider as MeshCollider;
 				if (!mesh || !mesh.sharedMesh || !mesh.sharedMesh.isReadable)
 				{
-					RegrowthPlugin.Log.LogWarning($"CopperDeposits OverDeepestHole: piece {list.Count} of {Fractured} has no mesh to read; deposits stay where they are.");
+					RegrowthPlugin.Log.LogWarning($"{shape.Section} OverDeepestHole: piece {list.Count} of {shape.Fractured} has no mesh to read; they stay where they are.");
 					return false;
 				}
 				Vector3[] vertices = mesh.sharedMesh.vertices;
@@ -189,33 +210,45 @@ namespace ResourceRegrowth
 				}
 				list.Add(vertices);
 			}
-			pieces = list;
-			wholeScale = whole.transform.localScale.x;
-			fracturedScale = fractured.transform.localScale.x;
+			if (list.Count == 0)
+			{
+				RegrowthPlugin.Log.LogWarning($"{shape.Section} OverDeepestHole: {shape.Fractured} has no pieces; they stay where they are.");
+				return false;
+			}
+			shape.pieces = list;
+			shape.wholeScale = whole.transform.localScale.x;
+			shape.fracturedScale = fractured.transform.localScale.x;
 			width = template.m_width;
 			scale = template.m_scale;
-			failed = false;
+			shape.failed = false;
 			return true;
 		}
 
 		/*
-			need: how much higher than `up` under its place now the deposit must stand for each of its live pieces to reach `margin` over the
-			deepest hole (negative: that much less would do). byLocation: a location's own ground counted. Waiting: a location near is still
+			need: how much higher than the game placed it (its place now, `up` lower) the deposit must stand for each of its live pieces to reach
+			`margin` over the deepest hole (negative: that much less would do). byLocation: a location's own ground counted. Waiting: a location near is still
 			being read. Failed: nothing to measure, or a location near could not be read.
 			turn: the turn it is measured in and is to stand in. With maxTilt 0, `upright` (the deposit's own as the game placed it), measured as it
 			is and as the world's save brings it back. Over 0, tilted from `upright` to lie along the ground under it (FollowSlope): the plane that
 			fits the ground's vertices within the rock's reach of its root, the ground as the floor counts it, the locations' levelling included;
 			by at most maxTilt degrees, and not at all for a slope under MinTilt. Its Euler angles are then those the save keeps (half degrees),
 			so the save brings back the very same turn. tilted: the degrees it is tilted by.
+			room: with underGround 0 or more, how much higher than the game placed it it can stand with every vertex of its live pieces underGround
+			under the lowest ground the locations can leave (negative: out of it, or nearer it, already, as the game placed it); otherwise
+			float.MaxValue. Both from the game's height, so a deposit raised by `up` is to rise by need - up (or room - up) more.
+			overs: when given, each live piece's height over the deepest hole (its highest vertex, the lower of the two turns), in the pieces' order.
 		*/
-		public static Result Measure(ZDO zdo, float margin, float up, float maxTilt, Vector3 upright, out float need, out bool byLocation, out Vector3 turn, out float tilted)
+		public static Result Measure(Shape shape, ZDO zdo, float margin, float up, float maxTilt, Vector3 upright, float underGround, List<float> overs,
+			out float need, out bool byLocation, out Vector3 turn, out float tilted, out float room)
 		{
 			need = 0f;
+			room = float.MaxValue;
 			byLocation = false;
 			LastBound = false;
 			turn = upright;
 			tilted = 0f;
-			if (!Ready())
+			overs?.Clear();
+			if (!Ready(shape))
 			{
 				return Result.Failed;
 			}
@@ -226,12 +259,13 @@ namespace ResourceRegrowth
 			{
 				return nearby;
 			}
-			bool fractured = zdo.GetPrefab() == FracturedHash;
+			bool fractured = zdo.GetPrefab() == shape.FracturedHash;
 			Vector3 size = zdo.GetVec3(ZDOVars.s_scaleHash, Vector3.zero);
 			if (size == Vector3.zero)
 			{
-				size = Vector3.one * zdo.GetFloat(ZDOVars.s_scaleScalarHash, fractured ? fracturedScale : wholeScale);
+				size = Vector3.one * zdo.GetFloat(ZDOVars.s_scaleScalarHash, fractured ? shape.fracturedScale : shape.wholeScale);
 			}
+			List<Vector3[]> pieces = shape.pieces;
 			float[] health = fractured ? Health(zdo) : null;
 			float[] floor = null;
 			int x0 = 0, z0 = 0, nx = 0, nz = 0;
@@ -278,11 +312,12 @@ namespace ResourceRegrowth
 			}
 			// Its turn as the game has it now and as the world's save brings it back: each piece must reach in both.
 			Vector3 saved = Saved(turn);
+			int turns = saved == turn ? 1 : 2;
 			world.Clear();
 			ends.Clear();
 			minX = minZ = float.MaxValue;
 			maxX = maxZ = float.MinValue;
-			for (int t = 0; t < (saved == turn ? 1 : 2); t++)
+			for (int t = 0; t < turns; t++)
 			{
 				Quaternion rotation = Quaternion.Euler(t == 0 ? turn : saved);
 				for (int a = 0; a < pieces.Count; a++)
@@ -322,9 +357,10 @@ namespace ResourceRegrowth
 				}
 			}
 			need = float.MinValue;
-			int start = 0;
-			foreach (int end in ends)
+			int start = 0, live = ends.Count / turns;
+			for (int e = 0; e < ends.Count; e++)
 			{
+				int end = ends[e];
 				float over = float.MinValue;
 				for (int k = start; k < end; k++)
 				{
@@ -332,19 +368,51 @@ namespace ResourceRegrowth
 					over = Mathf.Max(over, w.y - (Read(floor, x0, z0, nx, nz, w.x, w.z) - DigDepth));
 				}
 				need = Mathf.Max(need, margin - over);
+				if (overs != null)
+				{
+					if (e < live)
+					{
+						overs.Add(over);
+					}
+					else
+					{
+						overs[e - live] = Mathf.Min(overs[e - live], over);
+					}
+				}
 				start = end;
+			}
+			if (underGround >= 0f)
+			{
+				// The same grid, the same locations near: the lowest they can leave it.
+				bool unused = false;
+				float[] low = FloorAt(x0, z0, nx, nz, true, ref unused);
+				if (low == null)
+				{
+					return Result.Failed;
+				}
+				foreach (Vector3 w in world)
+				{
+					room = Mathf.Min(room, Read(low, x0, z0, nx, nz, w.x, w.z) - underGround - w.y);
+				}
 			}
 			return Result.Measured;
 		}
 
-		// The ground's vertices from minX/minZ to maxX/maxZ and one more each way, levelled by the locations near (Near first); null where a
-		// modifier the game itself could not apply (a smooth of no radius, another mod's) would leave no height: nothing is moved by it.
+		// The ground's vertices from minX/minZ to maxX/maxZ and one more each way, levelled by the locations near (Near first): the highest they can
+		// leave each vertex at. Null where a modifier the game itself could not apply (a smooth of no radius, another mod's) would leave no height:
+		// nothing is moved by it.
 		private static float[] Floor(float minX, float maxX, float minZ, float maxZ, out int x0, out int z0, out int nx, out int nz, ref bool byLocation)
 		{
 			x0 = Mathf.FloorToInt(minX) - 1;
 			z0 = Mathf.FloorToInt(minZ) - 1;
 			nx = Mathf.CeilToInt(maxX) + 2 - x0;
 			nz = Mathf.CeilToInt(maxZ) + 2 - z0;
+			return FloorAt(x0, z0, nx, nz, false, ref byLocation);
+		}
+
+		// The grid's vertices, levelled by the locations near: the highest they can leave each at, or with `lowest` the lowest.
+		private static float[] FloorAt(int x0, int z0, int nx, int nz, bool lowest, ref bool byLocation)
+		{
 			float[] raw = new float[nx * nz];
 			for (int i = 0; i < nz; i++)
 			{
@@ -353,7 +421,7 @@ namespace ResourceRegrowth
 					raw[i * nx + j] = Vertex(x0 + j, z0 + i);
 				}
 			}
-			float[] floor = Levelled(raw, x0, z0, nx, nz, out bool levelled);
+			float[] floor = Levelled(raw, x0, z0, nx, nz, lowest, out bool levelled);
 			byLocation |= levelled;
 			foreach (float h in floor)
 			{
@@ -486,9 +554,9 @@ namespace ResourceRegrowth
 
 		/*
 			The ground under the deposit once the locations near have levelled it: of every turn and every modifier there or not, the highest
-			it can be at each vertex.
+			it can be at each vertex, or with `lowest` the lowest.
 		*/
-		private static float[] Levelled(float[] raw, int x0, int z0, int nx, int nz, out bool byLocation)
+		private static float[] Levelled(float[] raw, int x0, int z0, int nx, int nz, bool lowest, out bool byLocation)
 		{
 			byLocation = false;
 			// What each location can reach of the grid in any turn; one reaching none of it plays no part.
@@ -568,7 +636,7 @@ namespace ResourceRegrowth
 						modifiersOf += near[a].modifiers.Count;
 					}
 				}
-				float[] highest = pairings == 1 || pairings * modifiersOf <= exactWork ? Paired(raw, x0, z0, nx, nz, together, pairings) : Bound(raw, x0, z0, nx, nz, together);
+				float[] ground = pairings == 1 || pairings * modifiersOf <= exactWork ? Paired(raw, x0, z0, nx, nz, together, pairings, lowest) : Bound(raw, x0, z0, nx, nz, together, lowest);
 				// The group's own vertices only: another group's are its own.
 				foreach (NearLocation location in together)
 				{
@@ -576,7 +644,7 @@ namespace ResourceRegrowth
 					{
 						for (int j = location.minJ; j <= location.maxJ; j++)
 						{
-							best[i * nx + j] = highest[i * nx + j];
+							best[i * nx + j] = ground[i * nx + j];
 						}
 					}
 				}
@@ -588,10 +656,10 @@ namespace ResourceRegrowth
 			return best;
 		}
 
-		// Every pairing of the group's turns, each with its modifiers in the game's order: the highest the ground comes out at each vertex.
-		private static float[] Paired(float[] raw, int x0, int z0, int nx, int nz, List<NearLocation> together, long pairings)
+		// Every pairing of the group's turns, each with its modifiers in the game's order: the highest (lowest) the ground comes out at each vertex.
+		private static float[] Paired(float[] raw, int x0, int z0, int nx, int nz, List<NearLocation> together, long pairings, bool lowest)
 		{
-			float[] highest = null;
+			float[] extreme = null;
 			for (long pairing = 0; pairing < pairings; pairing++)
 			{
 				placed.Clear();
@@ -609,27 +677,27 @@ namespace ResourceRegrowth
 				float[] grid = (float[])raw.Clone();
 				foreach (Placed p in placed)
 				{
-					Apply(grid, x0, z0, nx, nz, p);
+					Apply(grid, x0, z0, nx, nz, p, lowest);
 				}
-				if (highest == null)
+				if (extreme == null)
 				{
-					highest = grid;
+					extreme = grid;
 					continue;
 				}
-				for (int k = 0; k < highest.Length; k++)
+				for (int k = 0; k < extreme.Length; k++)
 				{
-					highest[k] = Mathf.Max(highest[k], grid[k]);
+					extreme[k] = lowest ? Mathf.Min(extreme[k], grid[k]) : Mathf.Max(extreme[k], grid[k]);
 				}
 			}
-			return highest;
+			return extreme;
 		}
 
 		/*
 			Too many turns to pair: every modifier of every turn as one that may not be there, all in the game's order. In any one pairing its
 			modifiers come in that same order, and level and smooth give no lower ground for higher ground given, so what this leaves is never
-			under what that pairing leaves.
+			under what that pairing leaves (with `lowest`, never over it).
 		*/
-		private static float[] Bound(float[] raw, int x0, int z0, int nx, int nz, List<NearLocation> together)
+		private static float[] Bound(float[] raw, int x0, int z0, int nx, int nz, List<NearLocation> together, bool lowest)
 		{
 			LastBound = true;
 			placed.Clear();
@@ -647,7 +715,7 @@ namespace ResourceRegrowth
 			float[] grid = (float[])raw.Clone();
 			foreach (Placed p in placed)
 			{
-				Apply(grid, x0, z0, nx, nz, p);
+				Apply(grid, x0, z0, nx, nz, p, lowest);
 			}
 			return grid;
 		}
@@ -661,9 +729,9 @@ namespace ResourceRegrowth
 		/*
 			Heightmap.LevelTerrain, then SmoothTerrain2, for a location's own modifier, on every heightmap it reaches: each takes the vertex
 			nearest its centre in its own frame (WorldToVertexMask for the level, WorldToVertex for the smooth). One that may not be there leaves
-			the higher of the two.
+			the higher of the two, or with `lowest` the lower.
 		*/
-		private static void Apply(float[] grid, int x0, int z0, int nx, int nz, Placed p)
+		private static void Apply(float[] grid, int x0, int z0, int nx, int nz, Placed p, bool lowest)
 		{
 			Modifier m = p.modifier;
 			// ApplyModifier: the modifier's position, raised by its offset.
@@ -717,7 +785,7 @@ namespace ResourceRegrowth
 					}
 					if (touched)
 					{
-						grid[i * nx + j] = m.maybe || p.maybe ? Mathf.Max(h, changed) : changed;
+						grid[i * nx + j] = m.maybe || p.maybe ? (lowest ? Mathf.Min(h, changed) : Mathf.Max(h, changed)) : changed;
 					}
 				}
 			}
@@ -928,7 +996,7 @@ namespace ResourceRegrowth
 					unread.Add(location);
 					if (warned.Add(location))
 					{
-						RegrowthPlugin.Log.LogWarning($"CopperDeposits OverDeepestHole: location {location.m_prefabName} could not be read ({why}); the deposits near one are measured once it can be, tried again at each pass.");
+						RegrowthPlugin.Log.LogWarning($"OverDeepestHole: location {location.m_prefabName} could not be read ({why}); the deposits near one are measured once it can be, tried again at each pass.");
 					}
 				}
 				yield return null;

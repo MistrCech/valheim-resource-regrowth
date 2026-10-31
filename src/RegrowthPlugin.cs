@@ -10,21 +10,21 @@ namespace ResourceRegrowth
 		with its part switched on: ZoneSystem.SpawnLocation with [Zones], to place a location of a zone
 		generated again the way round it was (ZoneReset); WearNTear.Destroy with [LocationObjects], to
 		tell a piece it put back that fell for lack of support (Regrowth.OnFell); ZoneSystem.SpawnZone with
-		[CopperDeposits] OverDeepestHole, to raise the copper deposits of a zone as it is generated.
+		[CopperDeposits] or [SilverVeins] OverDeepestHole, to raise the copper deposits and silver veins of a zone as it is generated.
 	*/
 	[BepInPlugin(GUID, PluginName, PluginVersion)]
 	public class RegrowthPlugin : BaseUnityPlugin
 	{
 		public const string GUID = "sarkasticeu.resource_regrowth";
 		public const string PluginName = "Sarkastic.gg Resource Regrowth";
-		public const string PluginVersion = "0.9.3";
+		public const string PluginVersion = "0.9.4";
 
 		internal static ManualLogSource Log;
 		// Whether ZoneSystem.SpawnLocation is patched for zone resets (only at startup, with Zones on), or failed to be.
 		internal static bool SpawnLocationPatched, SpawnLocationPatchFailed;
 		// Whether WearNTear.Destroy is patched to tell fallen pieces (only at startup, with LocationObjects on), or failed to be.
 		internal static bool DestroyPatched, DestroyPatchFailed;
-		// Whether ZoneSystem.SpawnZone is patched to raise the copper deposits of a zone generated now (only at startup, with CopperDeposits OverDeepestHole on), or failed to be.
+		// Whether ZoneSystem.SpawnZone is patched to raise the copper deposits and silver veins of a zone generated now (only at startup, with an OverDeepestHole on), or failed to be.
 		internal static bool SpawnZonePatched, SpawnZonePatchFailed;
 
 		private Settings settings;
@@ -44,7 +44,7 @@ namespace ResourceRegrowth
 				DestroyPatched = Patch(typeof(WearNTear_Destroy_Patch), "WearNTear.Destroy");
 				DestroyPatchFailed = !DestroyPatched;
 			}
-			if (settings.CopperOverDeepestHole.Value >= 0f)
+			if (settings.CopperOverDeepestHole.Value >= 0f || settings.SilverOverDeepestHole.Value >= 0f)
 			{
 				SpawnZonePatched = Patch(typeof(ZoneSystem_SpawnZone_Patch), "ZoneSystem.SpawnZone");
 				SpawnZonePatchFailed = !SpawnZonePatched;

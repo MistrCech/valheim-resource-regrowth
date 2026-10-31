@@ -94,7 +94,7 @@ namespace ResourceRegrowth
 		private float presenceTimer;
 		private float passTimer;
 		private Coroutine running;
-		// The world has had objects since the start: one without any now is shutting down, not new (CopperDeposits.Apply).
+		// The world has had objects since the start: one without any now is shutting down, not new (OreDeposits.Apply).
 		private bool worldSeen;
 
 		public Regrowth(MonoBehaviour host, Settings settings)
@@ -123,7 +123,7 @@ namespace ResourceRegrowth
 				state.PresenceKnownSince = now.AddHours(-Math.Max(0f, settings.IdleHours.Value));
 			}
 			worldSeen = WorldLoaded();
-			if (CopperDeposits.Apply(settings, state, host, piecePrefabs, worldSeen, !worldSeen))
+			if (OreDeposits.Apply(settings, state, host, piecePrefabs, worldSeen, !worldSeen))
 			{
 				SaveState();
 			}
@@ -142,11 +142,12 @@ namespace ResourceRegrowth
 						: "LocationObjects: switched on after the server started; until a restart a piece put back that falls is put back again (the game method that tells is patched at startup only).");
 				}
 			}
-			if (settings.CopperOverDeepestHole.Value >= 0f && !RegrowthPlugin.SpawnZonePatched)
+			if ((settings.CopperOverDeepestHole.Value >= 0f || settings.SilverOverDeepestHole.Value >= 0f) && !RegrowthPlugin.SpawnZonePatched)
 			{
+				string which = settings.CopperOverDeepestHole.Value < 0f ? "SilverVeins" : settings.SilverOverDeepestHole.Value < 0f ? "CopperDeposits" : "CopperDeposits and SilverVeins";
 				RegrowthPlugin.Log.LogWarning(RegrowthPlugin.SpawnZonePatchFailed
-					? "CopperDeposits OverDeepestHole: ZoneSystem.SpawnZone could not be patched at startup (see the error above); a deposit of a zone generated now is raised at the next pass, once no player is near."
-					: "CopperDeposits OverDeepestHole: switched on after the server started; until a restart a deposit of a zone generated now is raised at the next pass, once no player is near.");
+					? $"{which} OverDeepestHole: ZoneSystem.SpawnZone could not be patched at startup (see the error above); a deposit of a zone generated now is raised at the next pass, once no player is near."
+					: $"{which} OverDeepestHole: switched on after the server started; until a restart a deposit of a zone generated now is raised at the next pass, once no player is near.");
 			}
 			if (settings.ZonesEnabled.Value)
 			{
@@ -178,7 +179,7 @@ namespace ResourceRegrowth
 				running = null;
 			}
 			zones?.Stop();
-			CopperDeposits.Stop();
+			OreDeposits.Stop();
 			if (ZDOMan.instance != null)
 			{
 				ZDOMan.instance.m_onZDODestroyed -= OnDestroyed;
@@ -192,7 +193,7 @@ namespace ResourceRegrowth
 
 		public void Tick(float dt)
 		{
-			CopperDeposits.Work();
+			OreDeposits.Work();
 			presenceTimer -= dt;
 			if (presenceTimer <= 0f)
 			{
@@ -222,7 +223,7 @@ namespace ResourceRegrowth
 				zones?.ReloadProtected();
 				bool loaded = WorldLoaded();
 				worldSeen |= loaded;
-				if (CopperDeposits.Apply(settings, state, host, piecePrefabs, loaded, !worldSeen))
+				if (OreDeposits.Apply(settings, state, host, piecePrefabs, loaded, !worldSeen))
 				{
 					SaveState();
 				}
@@ -440,9 +441,9 @@ namespace ResourceRegrowth
 				Dictionary<Vector2s, List<ZDO>> remains = new Dictionary<Vector2s, List<ZDO>>();
 				// What the world generated that can hold a location object up (LocationObjects.Holds, no creator), by zone.
 				Dictionary<Vector2s, List<ZDO>> worldPieces = new Dictionary<Vector2s, List<ZDO>>();
-				// For CopperDeposits: its deposits and the player's building pieces by zone.
-				List<ZDOID> copperDeposits = new List<ZDOID>();
-				Dictionary<Vector2s, List<Vector3>> copperBuilds = new Dictionary<Vector2s, List<Vector3>>();
+				// For OreDeposits: the copper deposits and silver veins, and the player's building pieces by zone.
+				List<ZDOID> deposits = new List<ZDOID>();
+				Dictionary<Vector2s, List<Vector3>> depositBuilds = new Dictionary<Vector2s, List<Vector3>>();
 
 				// 1. One pass over every object: note player builds and tombstones, collect candidates.
 				zones?.Clear();
@@ -457,7 +458,7 @@ namespace ResourceRegrowth
 						AddBlocker(blockers, zdo.GetPosition(), prefab);
 						if (!tombstonePrefabs.Contains(prefab))
 						{
-							CopperDeposits.NoteBuild(copperBuilds, zdo.GetPosition());
+							OreDeposits.NoteBuild(depositBuilds, zdo.GetPosition());
 						}
 					}
 					else if (locationObjects != null && holderPrefabs.Contains(prefab))
@@ -469,9 +470,9 @@ namespace ResourceRegrowth
 						}
 						pieceList.Add(zdo);
 					}
-					if (CopperDeposits.IsDeposit(prefab))
+					if (OreDeposits.IsDeposit(prefab))
 					{
-						copperDeposits.Add(zdo.m_uid);
+						deposits.Add(zdo.m_uid);
 					}
 					if (generatorPrefabs.Contains(prefab))
 					{
@@ -544,7 +545,7 @@ namespace ResourceRegrowth
 				{
 					yield break;
 				}
-				CopperDeposits.Collected(copperDeposits, copperBuilds);
+				OreDeposits.Collected(deposits, depositBuilds);
 				// From the objects themselves, so what a restart forgot is found again.
 				unsettled = stillUnsettled;
 				// Where location objects stood: new locations and rooms only, at most one prefab read per frame.

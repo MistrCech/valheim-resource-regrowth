@@ -1,6 +1,6 @@
 # Sarkastic.gg Resource Regrowth
 
-![version: 0.9.1](https://img.shields.io/badge/version-0.9.1-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
+![version: 0.9.4](https://img.shields.io/badge/version-0.9.4-3b6e8f?style=flat-square)  ![players: vanilla clients](https://img.shields.io/badge/players-vanilla%20clients-4f7a4a?style=flat-square)  ![Valheim: 1.0](https://img.shields.io/badge/Valheim-1.0-7a5c2e?style=flat-square)  ![BepInEx: 5.4.2351](https://img.shields.io/badge/BepInEx-5.4.2351-5b5f66?style=flat-square)  ![license: MIT](https://img.shields.io/badge/license-MIT-5b5f66?style=flat-square)
 
 [Source code](https://github.com/MistrCech/valheim-resource-regrowth)  ·  [Report a bug](https://github.com/MistrCech/valheim-resource-regrowth/issues/new)  ·  [Changelog](https://github.com/MistrCech/valheim-resource-regrowth/blob/main/CHANGELOG.md)  ·  [Dedicated Simulation](https://thunderstore.io/c/valheim/p/Sarkastic_gg/Dedicated_Simulation/)
 
@@ -27,7 +27,8 @@ It brings one-time world content back once an area has been left alone for a whi
   ever been there. Never at a base (a workbench); players' things stay as they are.
 
 Players need nothing: vanilla clients work. The plugin depends on BepInEx and nothing else. It
-patches two game methods, each only with its part switched on (Zones; Location objects).
+patches three game methods, each only with its part switched on (Zones; Location objects; copper deposits and silver veins
+raised as a zone is generated).
 
 **Recommended with [Dedicated Simulation](https://thunderstore.io/c/valheim/p/Sarkastic_gg/Dedicated_Simulation/)** (`Sarkastic_gg/Dedicated_Simulation`, [GitHub](https://github.com/MistrCech/valheim-serverside)), a fork of Serverside Simulations by ddormer that keeps the world simulated on the server. This plugin works on its own, but the two are made to run together: the zone reset generates a zone the way Dedicated Simulation does.
 
@@ -241,6 +242,43 @@ against the floor the game builds itself as above, none was short, before or aft
 through the game's physics left no piece. It took 1.3 s of work over 243 frames, the worst 12 ms. Back at 0, every deposit stands
 again as the game turned it, within 0.07 m of its old height. The turn is stored to the half degree, as the game's save keeps it.
 
+### Silver veins
+
+A silver vein is made like a copper deposit: a rock that the first hit swaps for its pieces, with silver in them. The game puts
+its root 4 m under the ground in the Mountains, always upright, on slopes of up to 30 degrees, and as for copper a pit goes 8 m
+down at most around it. On a copy of the live world, 23 of 117 veins had pieces less than 0.5 m over that deepest pit, most on
+slopes, and 18 already stuck out of the ground somewhere. Silver is meant to be found with the wishbone, not seen, so a vein must
+not be brought up into sight.
+
+`[SilverVeins] OverDeepestHole` raises a vein by what it needs for every piece to reach that far over the deepest pit, measured
+as for copper, but never so far that any part of it comes nearer the ground than `UnderGround` (0.5 m): every vertex of the
+pieces still to be mined (the corners of their meshes) stays at least that deep. The ground counted for this is the lowest any
+location nearby can leave it, however that location turns out to be placed. A vein that needs nothing stays as the game made
+it, and one the game left out of the ground, or nearer it than that, is not raised. With `FollowSlope`, a vein that still has
+pieces out of reach is tilted to lie along its slope, at most this many degrees (not on ground flatter than 2 degrees), when that
+leaves fewer of them out of reach and none of it nearer the ground than `UnderGround`, and then raised as far as that allows; one
+the game left nearer than that may be tilted as long as no part of it comes nearer than it stood upright. On the copy, with
+`OverDeepestHole = 0.5`, `UnderGround = 0.5` and `FollowSlope = 30`:
+
+| | Veins with pieces short of 0.5 m over the deepest pit | Veins with a vertex out of the ground | The others with a vertex less than 0.5 m under it |
+|---|---|---|---|
+| as the game makes them | 23 of 117 | 18 | 16 |
+| and the three settings | 0 | 13 | 10 |
+
+23 veins were moved. 7 were raised by 0.2 to 0.8 m and stayed upright. The other 16 could not have risen far enough upright
+without some part coming nearer the ground than 0.5 m, so they were tilted along their slopes instead, by 19 to 30 degrees (a
+median 26), and one of them was raised 0.2 m as well. None had to stop short of what it needs, and every vertex of each lies at
+least 0.64 m under the game's own ground. The five the game had left sticking out were among the tilted ones: they lie under the
+ground now. Checked against the floor the game builds itself, as for copper: none is short, and mining them through the game's
+own physics leaves no piece. The 13 veins still showing and the 10 near the surface need nothing and stay as the game made them.
+40 Mountain zones generated during the test got the same as they were generated (17 veins, one of them tilted, about 2 ms a
+zone); the rest took 0.16 s of work over 37 frames, the worst 6 ms.
+
+As for copper, none is moved while a player's game may have it loaded (it waits for a later pass), one within 20 m of a player's
+building stays where it is whatever the setting, one broken open is raised but never turned, and zones generated later need the
+setting on when the server starts. Back at -1, every vein goes back to the height and the turn the game gave it; one broken open
+since stays where it is.
+
 ### Buildings of a camp or village
 
 The walls, poles, roofs and stairs of a Fuling village, camp or stone tower are location objects too. Listed in
@@ -439,6 +477,9 @@ without a restart (a list read again is said in the log); `Enabled`, the switche
 | CopperDeposits | RaiseMeters | 0 | metres higher than the game puts copper deposits, up to 8 (see Copper deposits); back to 0 puts them back |
 | CopperDeposits | OverDeepestHole | -1 | raise each copper deposit further, until every piece of it reaches this many metres over the deepest pit a pickaxe can dig (up to 4; 0.5 recommended); -1 = off, and what it raised goes back down |
 | CopperDeposits | FollowSlope | 0 | with `OverDeepestHole` on: the most degrees a copper deposit is tilted to lie along its slope (up to 45; 30 recommended); 0 = upright as the game stands it, and what it tilted stands back up |
+| SilverVeins | OverDeepestHole | -1 | raise each silver vein until every piece of it reaches this many metres over the deepest pit a pickaxe can dig, as far as `UnderGround` allows (up to 4; 0.5 recommended; see Silver veins); -1 = off, and what it moved goes back |
+| SilverVeins | UnderGround | 0.5 | metres under the ground every part of a silver vein stays at least when it is raised or tilted, the ground taken at the lowest the locations around can leave it (up to 4); more keeps more silver out of reach, less brings veins nearer sight |
+| SilverVeins | FollowSlope | 0 | with `OverDeepestHole` on: the most degrees a silver vein with pieces out of reach is tilted to lie along its slope, not on ground flatter than 2 degrees (up to 45; 30 recommended); 0 = upright as the game stands it, and what it tilted stands back up |
 | Zones | Enabled | false | generate visited zones again as the world first made them (needs a restart) |
 | Zones | DryRun | true | only log which zones would be generated again |
 | Zones | IdleHours | 72 | real hours with nobody near before a zone is generated again |

@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.9.4] - 2026-10-31
+
+### Added
+
+- `[SilverVeins]` `OverDeepestHole` (default -1, off), `UnderGround` (0.5) and `FollowSlope` (0): every piece of a silver vein
+  within a pickaxe's reach, without bringing any vein up into sight. The game puts a vein 4 m under the ground in the
+  Mountains, upright on slopes of up to 30 degrees: on a copy of the live world 23 of 117 veins had pieces less than 0.5 m over
+  the deepest pit, and 18 stuck out of the ground somewhere. A vein is raised by what it needs, measured as copper is, but no
+  further than leaves every vertex of it `UnderGround` under the lowest ground the locations around can leave; one that needs
+  nothing stays as the game made it, one the game left out of the ground is not raised, and with `FollowSlope` one that still
+  has pieces out of reach is tilted along its slope (not on ground flatter than 2 degrees) when that leaves fewer of them out of
+  reach and none of it nearer the ground than `UnderGround` (one the game left nearer: no nearer than upright). At 0.5 / 0.5 /
+  30: 23 veins moved (7 raised 0.2-0.8 m; 16 that could not rise far enough upright tilted 19-30 degrees instead, one of them
+  raised as well), none short, every vertex of each at least 0.64 m under the game's own ground (the five the game had left
+  sticking out among them), nothing left after mining through the game's physics, before and after the save was loaded back
+  (nothing to do then); the veins with a vertex out of the ground
+  went from 18 to 13, those 13 untouched, as the game made them. 40 Mountain zones generated during the test got the same as
+  they were generated, about 2 ms a zone; the rest took 0.16 s of work over 37 frames, the worst 6 ms. Back at -1 every vein
+  stands as the game made it (one broken open since stays where it is).
+
+### Changed
+
+- The copper code now serves both kinds (`CopperReach` and `CopperDeposits` are `OreReach` and `OreDeposits`); copper comes out
+  as with 0.9.3: on the copy of the live world 481 of 482 deposits the same. The other, in a zone generated during the test,
+  stood beside a crypt the game had turned otherwise in that run, and so on other ground: 8 cm higher and 0.9 degrees less
+  tilted, still at 0.5 m. The game turns a location as it generates the zone, by its own random generator, not seeded by the
+  zone, so each run can turn it another way (a second run of 0.9.4 turned the crypt a third way, and put that deposit 5 cm and
+  0.7 degrees otherwise again); of the 208 locations of the zones generated during the test, 56 to 75 were turned otherwise
+  between any two of the three runs, of the 2292 the world already had none.
+- The `OverDeepestHole` descriptions gave the wait near a player as 200 m; they now say what it is, as it always was: the zones
+  a client loads its objects from, one zone wider.
+
+### Fixed
+
+- Switching `OverDeepestHole` off (-1) put the deposits back without a word in the log, since 0.9.1, unless one stood by a
+  player's building or could not be measured: a batch was reported only when it measured or kept one, and the batch that puts
+  them back measures none. It now reports what it put back too (`... over the deepest hole (off, ...): 0 measured, 0 raised,
+  ... lowered back ..., ... stood as the game turned them`).
+
 ## [0.9.3] - 2026-10-31
 
 ### Added
