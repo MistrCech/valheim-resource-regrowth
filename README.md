@@ -114,8 +114,9 @@ The decisions run over frames, as the scan does: on a world of 864,000 objects a
 570-830 ms of work over about 320 frames, the worst of them 9-23 ms (35-40 ms in the first pass after a start, which also
 reads the layouts). The same decisions taken in one frame cost 430-500 ms on that world. On a live server, a Windows VM on
 an EPYC host, the same world takes about three times as long: 2.0-2.1 s of work over 530 frames, the worst 23-40 ms.
-A location's layout is read in one frame: listing the
-Ashlands ruins (`Charred*`) makes that frame 137 ms, as CharredRuins1 has 6 places on that world.
+A location's layout is read over frames too: each place is rolled, read and put back within one frame, the rest a few
+milliseconds a frame. With every location listed (`Locations = *`) CharredRuins1, 6 places on that world, takes 68-116 ms of
+work over 10-13 frames, the worst 9-17 ms, and the first pass 1.2 s of work with its worst frame 26-27 ms.
 
 ### Boss items
 
@@ -374,7 +375,8 @@ every world load.
 - A core stand or chest that some machine currently has loaded is left for a later pass.
 - Location objects: the first scan after a start reads the layouts of the locations and village
   buildings the world has (a few hundred prefabs, loaded in the background through the game's own
-  loader: measured about 0.3 s of work over 45 s, no frame over 100 ms); later scans only read new ones. A location
+  loader, and read over frames: with every location listed, 1.2 s of work in that pass, no frame over 27 ms on a Ryzen 9
+  7900X3D); later scans only read new ones. A location
   object's own zone must not be loaded, like everything else.
 
 ## Install

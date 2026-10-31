@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.9.2] - 2026-10-31
+
+### Changed
+
+- Location objects: a location's layout is read over frames. A pass used to read each layout in one frame, so the first pass
+  after a start, which reads them all, stalled the server for as long as the biggest took: on a copy of the live world with
+  every location listed (`[LocationObjects] Locations = *`), CharredRuins1 with its 6 places took 158 ms in one frame. Now
+  each place is rolled, read and put back within one frame -- the
+  game may place the same location meanwhile and must find its prefab as always -- and the rest, its parts and its slots, is
+  done a few milliseconds a frame: CharredRuins1 68-116 ms of work over 10-13 frames, the worst 9-17 ms, and the first pass
+  1.2 s of work instead of 1.6 s, the worst frame 26-27 ms instead of 159 (later passes as before, 9-22 ms). A location's random
+  parts are prepared once instead of for each place, a third of the work. What is read is the same: the 129,738 slots of the
+  6,620 places on that copy came out byte for byte as 0.9.1 read them, after the first pass and later. A layout of 30 ms of
+  work or with a frame of 10 ms is logged with its worst frame and what it was doing then.
+
 ## [0.9.1] - 2026-10-30
 
 ### Added

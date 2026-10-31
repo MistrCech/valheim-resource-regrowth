@@ -76,13 +76,17 @@ namespace ResourceRegrowth
 		private struct Template
 		{
 			public ZNetView view;
+			public string prefabName;
+			public int prefab;
 			public Vector3 local;
 			public Quaternion rotation;
-			public bool random;
 			public bool snaps;
 			public float snapOffset;
 			public Vector3 scale;
-			public List<ZNetView> supports;
+			// What can hold it up (Holds) of the same layout, beside or under it: their views, prefabs and places in the layout.
+			public ZNetView[] supports;
+			public int[] supportPrefabs;
+			public Vector3[] supportAt;
 		}
 
 		private const float SupportRadius = 3f;
@@ -532,20 +536,24 @@ namespace ResourceRegrowth
 				{
 					if (loaded)
 					{
-						System.Diagnostics.Stopwatch took = System.Diagnostics.Stopwatch.StartNew();
-						ReplayLocation(location, Listed(location), entry.Value);
-						onLoaded(1);
-						if (took.ElapsedMilliseconds >= 30)
+						Reading reading = new Reading();
+						IEnumerator replay = ReplayLocation(location, entry.Key, entry.Value, reading);
+						while (reading.Step(replay))
 						{
-							RegrowthPlugin.Log.LogInfo($"LocationObjects: reading the layout of {location.m_prefabName} for {entry.Value.Count} place(s) took {took.ElapsedMilliseconds} ms in one frame");
+							yield return null;
+						}
+						if (reading.failed != null)
+						{
+							// One layout that cannot be read must not end this pass, and the next, and every one after: its objects are left alone.
+							locationHasSlots[entry.Key] = false;
+							RegrowthPlugin.Log.LogWarning($"LocationObjects: the layout of {location.m_prefabName} could not be read; its objects are not put back: {reading.failed}");
+						}
+						else
+						{
+							onLoaded(1);
+							reading.Report($"the layout of {location.m_prefabName} for {entry.Value.Count} place(s)");
 						}
 					}
-				}
-				catch (Exception e)
-				{
-					// One layout that cannot be read must not end this pass, and the next, and every one after: its objects are left alone.
-					locationHasSlots[entry.Key] = false;
-					RegrowthPlugin.Log.LogWarning($"LocationObjects: the layout of {location.m_prefabName} could not be read; its objects are not put back: {e}");
 				}
 				finally
 				{
@@ -571,25 +579,83 @@ namespace ResourceRegrowth
 				{
 					if (loaded)
 					{
-						System.Diagnostics.Stopwatch took = System.Diagnostics.Stopwatch.StartNew();
-						ReplayRooms(entry.Key.Item1, entry.Key.Item2, room, entry.Value);
-						onLoaded(1);
-						if (took.ElapsedMilliseconds >= 30)
+						Reading reading = new Reading();
+						IEnumerator replay = ReplayRooms(entry.Key.Item1, entry.Key.Item2, room, entry.Value, reading);
+						while (reading.Step(replay))
 						{
-							RegrowthPlugin.Log.LogInfo($"LocationObjects: reading the layout of the room {room.m_prefab.Name} for {entry.Value.Count} place(s) took {took.ElapsedMilliseconds} ms in one frame");
+							yield return null;
+						}
+						if (reading.failed != null)
+						{
+							roomHasSlots[entry.Key] = false;
+							RegrowthPlugin.Log.LogWarning($"LocationObjects: the layout of the room {room.m_prefab.Name} could not be read; its objects are not put back: {reading.failed}");
+						}
+						else
+						{
+							onLoaded(1);
+							reading.Report($"the layout of the room {room.m_prefab.Name} for {entry.Value.Count} place(s)");
 						}
 					}
-				}
-				catch (Exception e)
-				{
-					roomHasSlots[entry.Key] = false;
-					RegrowthPlugin.Log.LogWarning($"LocationObjects: the layout of the room {room.m_prefab.Name} could not be read; its objects are not put back: {e}");
 				}
 				finally
 				{
 					room.m_prefab.Release();
 				}
 				yield return null;
+			}
+		}
+
+		// What a pass spends reading layouts in a frame before it waits for the next, as the pass's own slices (Regrowth.SliceMilliseconds).
+		private const long SliceMilliseconds = 4;
+
+		// One layout read over frames: a frame of it at a time, its work, its frames, its worst and what it was doing then.
+		private class Reading
+		{
+			public Exception failed;
+			// What the reading is at (set by it), for the log of its worst frame.
+			public string at = "starting";
+			private readonly System.Diagnostics.Stopwatch slice = new System.Diagnostics.Stopwatch();
+			private long ticks, worst;
+			private int frames;
+			private string worstAt = "";
+
+			// Whether this frame has had its share: the reading waits for the next at the first point it can.
+			public bool Slow => slice.ElapsedMilliseconds >= SliceMilliseconds;
+
+			// The next frame of the reading; false when it is done, or failed (failed then says why).
+			public bool Step(IEnumerator replay)
+			{
+				string from = at;
+				int collections = GC.CollectionCount(0);
+				slice.Restart();
+				bool more;
+				try
+				{
+					more = replay.MoveNext();
+				}
+				catch (Exception e)
+				{
+					failed = e;
+					more = false;
+				}
+				slice.Stop();
+				ticks += slice.ElapsedTicks;
+				if (slice.ElapsedTicks > worst)
+				{
+					worst = slice.ElapsedTicks;
+					worstAt = (from == at ? at : from + " to " + at) + (GC.CollectionCount(0) != collections ? ", with a garbage collection" : "");
+				}
+				frames++;
+				return more;
+			}
+
+			public void Report(string what)
+			{
+				double ms = ticks * 1000.0 / System.Diagnostics.Stopwatch.Frequency, worstMs = worst * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+				if (ms >= 30.0 || worstMs >= 10.0)
+				{
+					RegrowthPlugin.Log.LogInfo(FormattableString.Invariant($"LocationObjects: reading {what} took {ms:0} ms of work over {frames} frame(s), the worst {worstMs:0.0} ms ({worstAt})"));
+				}
 			}
 		}
 
@@ -679,215 +745,349 @@ namespace ResourceRegrowth
 			return watched;
 		}
 
-		private List<Template> Templates(ZNetView[] views, bool listed)
+		/*
+			The watched parts of a layout, as the game reads the prefab (a location's with its root at the origin: before and after put it
+			there and back). Over frames, the root put back at each wait: the game may spawn from the same prefab meanwhile.
+		*/
+		private IEnumerator ReadTemplates(ZNetView[] views, bool listed, List<Template> templates, Reading reading, Action before, Action after)
 		{
+			reading.at = "its parts";
 			List<ZNetView> watched = views.Where(view => Watched(view.gameObject, listed)).ToList();
 			// Not another object put back here: two fire pits side by side, both broken, would each wait for the other forever. In a
 			// listed location that is every piece but what LocationsExclude names.
 			HashSet<ZNetView> isWatched = new HashSet<ZNetView>(watched);
-			List<ZNetView> holders = views.Where(view => !isWatched.Contains(view) && Holds(view.gameObject)).ToList();
-			List<Template> templates = new List<Template>();
-			foreach (ZNetView view in watched)
-			{
-				Vector3 at = view.gameObject.transform.position;
-				SnapToGround snap = view.GetComponent<SnapToGround>();
-				templates.Add(new Template
-				{
-					view = view,
-					local = at,
-					rotation = view.gameObject.transform.rotation,
-					random = view.GetComponentInParent<RandomSpawn>(true) != null || view.GetComponentInParent<RandomObject>(true) != null,
-					// SnapToGround.SnappAll moves the object itself, after a location or a dungeon's rooms are placed.
-					snaps = snap != null,
-					snapOffset = snap ? snap.m_offset : 0f,
-					// As ZNetView.SyncScale writes it for a new object. On a copy of the live world only roots and ice in caves and crypts, up to 2.93 times their prefab.
-					scale = view.m_syncInitialScale && view.transform.localScale != Vector3.one ? view.transform.localScale : Vector3.zero,
-					supports = holders.Where(other => new Vector2(other.transform.position.x - at.x, other.transform.position.z - at.z).magnitude <= SupportRadius
-						&& other.transform.position.y <= at.y + 0.5f).ToList(),
-				});
-			}
-			return templates;
-		}
-
-		// ZoneSystem.SpawnLocation, Full mode, without instantiating anything.
-		private void ReplayLocation(ZoneSystem.ZoneLocation location, bool listed, List<ZDO> proxies)
-		{
-			int hash = location.m_prefab.Name.GetStableHashCode();
-			GameObject asset = location.m_prefab.Asset;
-			Vector3 rootPosition = asset.transform.position;
-			Quaternion rootRotation = asset.transform.rotation;
-			Location component = asset.GetComponent<Location>();
-			Heightmap.Biome biome = component ? component.m_biome : Heightmap.Biome.None;
-			UnityEngine.Random.State randomState = UnityEngine.Random.state;
+			ZNetView[] holders = views.Where(view => !isWatched.Contains(view) && Holds(view.gameObject)).ToArray();
+			int[] holderPrefabs = holders.Select(view => Utils.GetPrefabName(view.gameObject).GetStableHashCode()).ToArray();
+			Vector3[] holderAt = new Vector3[holders.Length];
+			before?.Invoke();
 			try
 			{
-				asset.transform.position = Vector3.zero;
-				asset.transform.rotation = Quaternion.identity;
-				ZNetView[] views = Utils.GetEnabledComponentsInChildren<ZNetView>(asset);
-				List<Template> templates = Templates(views, listed);
-				locationHasSlots[hash] = templates.Count > 0;
-				if (templates.Count == 0)
+				for (int j = 0; j < holders.Length; j++)
 				{
-					return;
-				}
-				RandomSpawn[] randomSpawns = Utils.GetEnabledComponentsInChildren<RandomSpawn>(asset);
-				RandomObject[] randomObjects = Utils.GetEnabledComponentsInChildren<RandomObject>(asset);
-				string name = location.m_prefab.Name;
-				foreach (ZDO proxy in proxies)
-				{
-					Vector3 position = proxy.GetPosition();
-					Quaternion rotation = PlacedRotation(proxy);
-					bool[] spawned = new bool[templates.Count];
-					List<ZNetView>[] supportsSpawned = new List<ZNetView>[templates.Count];
-					try
-					{
-						foreach (RandomSpawn randomSpawn in randomSpawns)
-						{
-							randomSpawn.Prepare();
-						}
-						UnityEngine.Random.InitState(proxy.GetInt(ZDOVars.s_seed));
-						foreach (RandomSpawn randomSpawn in randomSpawns)
-						{
-							randomSpawn.Randomize(position + rotation * randomSpawn.gameObject.transform.position, component);
-						}
-						foreach (RandomObject randomObject in randomObjects)
-						{
-							randomObject.Randomize(position + rotation * randomObject.gameObject.transform.position, component);
-						}
-						for (int i = 0; i < templates.Count; i++)
-						{
-							spawned[i] = templates[i].view.gameObject.activeSelf;
-							supportsSpawned[i] = templates[i].supports.Where(v => v.gameObject.activeSelf).ToList();
-						}
-					}
-					finally
-					{
-						Restore(randomSpawns, randomObjects, views);
-						if (component)
-						{
-							component.m_biome = biome;
-						}
-					}
-					Source source = new Source { name = name, position = position, anchor = position };
-					for (int i = 0; i < templates.Count; i++)
-					{
-						if (spawned[i])
-						{
-							string prefabName = Utils.GetPrefabName(templates[i].view.gameObject);
-							Vector3 at = position + rotation * templates[i].local;
-							source.slots.Add(new Slot
-							{
-								prefab = prefabName.GetStableHashCode(),
-								position = at,
-								rotation = rotation * templates[i].rotation,
-								source = name,
-								key = Key(prefabName, at),
-								snaps = templates[i].snaps,
-								snapOffset = templates[i].snapOffset,
-								scale = templates[i].scale,
-								supports = supportsSpawned[i].Count == 0 ? null
-									: supportsSpawned[i].Select(v => (Utils.GetPrefabName(v.gameObject).GetStableHashCode(), position + rotation * v.transform.position)).ToList(),
-							});
-						}
-					}
-					Add(ProxyKey(proxy, hash), source);
+					holderAt[j] = holders[j].transform.position;
 				}
 			}
 			finally
+			{
+				after?.Invoke();
+			}
+			List<int> near = new List<int>();
+			int i = 0;
+			while (i < watched.Count)
+			{
+				if (reading.Slow)
+				{
+					yield return null;
+				}
+				reading.at = "its parts' places";
+				before?.Invoke();
+				try
+				{
+					do
+					{
+						ZNetView view = watched[i++];
+						Vector3 at = view.gameObject.transform.position;
+						SnapToGround snap = view.GetComponent<SnapToGround>();
+						near.Clear();
+						for (int j = 0; j < holders.Length; j++)
+						{
+							if (new Vector2(holderAt[j].x - at.x, holderAt[j].z - at.z).magnitude <= SupportRadius && holderAt[j].y <= at.y + 0.5f)
+							{
+								near.Add(j);
+							}
+						}
+						string prefabName = Utils.GetPrefabName(view.gameObject);
+						templates.Add(new Template
+						{
+							view = view,
+							prefabName = prefabName,
+							prefab = prefabName.GetStableHashCode(),
+							local = at,
+							rotation = view.gameObject.transform.rotation,
+							// SnapToGround.SnappAll moves the object itself, after a location or a dungeon's rooms are placed.
+							snaps = snap != null,
+							snapOffset = snap ? snap.m_offset : 0f,
+							// As ZNetView.SyncScale writes it for a new object. On a copy of the live world only roots and ice in caves and crypts, up to 2.93 times their prefab.
+							scale = view.m_syncInitialScale && view.transform.localScale != Vector3.one ? view.transform.localScale : Vector3.zero,
+							supports = near.Select(j => holders[j]).ToArray(),
+							supportPrefabs = near.Select(j => holderPrefabs[j]).ToArray(),
+							supportAt = near.Select(j => holderAt[j]).ToArray(),
+						});
+					}
+					while (i < watched.Count && !reading.Slow);
+				}
+				finally
+				{
+					after?.Invoke();
+				}
+			}
+		}
+
+		/*
+			RandomSpawn.Prepare, once for all the places of a prefab: which networked objects each takes down with it. The game does it at every
+			spawn, from the prefab as it always leaves it (every part active), so it comes out the same every time.
+		*/
+		private static IEnumerator Prepare(RandomSpawn[] randomSpawns, Reading reading)
+		{
+			reading.at = "preparing its random parts";
+			for (int i = 0; i < randomSpawns.Length; i++)
+			{
+				randomSpawns[i].Prepare();
+				if (reading.Slow && i + 1 < randomSpawns.Length)
+				{
+					yield return null;
+				}
+			}
+		}
+
+		// Which watched parts the roll left active, and which of what holds each up: read before the prefab is put back.
+		private static void Read(List<Template> templates, bool[] spawned, bool[][] held)
+		{
+			for (int i = 0; i < templates.Count; i++)
+			{
+				Template template = templates[i];
+				spawned[i] = template.view.gameObject.activeSelf;
+				if (template.supports.Length > 0)
+				{
+					bool[] standing = held[i] = new bool[template.supports.Length];
+					for (int j = 0; j < standing.Length; j++)
+					{
+						standing[j] = template.supports[j].gameObject.activeSelf;
+					}
+				}
+			}
+		}
+
+		// The pieces under or beside a slot that spawned, where they stand in the world (place: from the layout's position); null with none.
+		private static List<(int prefab, Vector3 position)> Supports(Template template, bool[] standing, Func<Vector3, Vector3> place)
+		{
+			List<(int, Vector3)> supports = null;
+			for (int j = 0; standing != null && j < standing.Length; j++)
+			{
+				if (standing[j])
+				{
+					(supports ?? (supports = new List<(int, Vector3)>())).Add((template.supportPrefabs[j], place(template.supportAt[j])));
+				}
+			}
+			return supports;
+		}
+
+		/*
+			ZoneSystem.SpawnLocation, Full mode, without instantiating anything. Over frames, as a pass reads its layouts (Refresh): between two,
+			the prefab is as the game leaves it, for the game may spawn from it meanwhile and reads which of its parts are active when it does.
+			So a place is rolled, read and put back within one frame, and the rest -- its parts, the slots -- is done a slice at a time.
+		*/
+		private IEnumerator ReplayLocation(ZoneSystem.ZoneLocation location, int key, List<ZDO> proxies, Reading reading)
+		{
+			bool listed = Listed(location);
+			int hash = location.m_prefab.Name.GetStableHashCode();
+			GameObject asset = location.m_prefab.Asset;
+			Location component = asset.GetComponent<Location>();
+			Heightmap.Biome biome = component ? component.m_biome : Heightmap.Biome.None;
+			string name = location.m_prefab.Name;
+			Vector3 rootPosition = Vector3.zero;
+			Quaternion rootRotation = Quaternion.identity;
+			// SpawnLocation reads the prefab with its root at the origin, and puts it back after.
+			void AtOrigin()
+			{
+				rootPosition = asset.transform.position;
+				rootRotation = asset.transform.rotation;
+				asset.transform.position = Vector3.zero;
+				asset.transform.rotation = Quaternion.identity;
+			}
+			void Back()
 			{
 				asset.transform.position = rootPosition;
 				asset.transform.rotation = rootRotation;
-				UnityEngine.Random.state = randomState;
 			}
-		}
-
-		// DungeonGenerator.PlaceRoom, Full mode, without instantiating anything.
-		private void ReplayRooms(int hash, bool listed, DungeonDB.RoomData room, List<(ZDO generator, Vector3 position, Quaternion rotation)> placed)
-		{
-			GameObject asset = room.m_prefab.Asset;
-			UnityEngine.Random.State randomState = UnityEngine.Random.state;
-			try
+			ZNetView[] views = Utils.GetEnabledComponentsInChildren<ZNetView>(asset);
+			List<Template> templates = new List<Template>();
+			IEnumerator parts = ReadTemplates(views, listed, templates, reading, AtOrigin, Back);
+			while (parts.MoveNext())
 			{
-				ZNetView[] views = Utils.GetEnabledComponentsInChildren<ZNetView>(asset);
-				List<Template> templates = Templates(views, listed);
-				roomHasSlots[(hash, listed)] = templates.Count > 0;
-				if (templates.Count == 0)
+				yield return null;
+			}
+			locationHasSlots[hash] = templates.Count > 0;
+			if (templates.Count == 0)
+			{
+				yield break;
+			}
+			RandomSpawn[] randomSpawns = Utils.GetEnabledComponentsInChildren<RandomSpawn>(asset);
+			RandomObject[] randomObjects = Utils.GetEnabledComponentsInChildren<RandomObject>(asset);
+			IEnumerator prepare = Prepare(randomSpawns, reading);
+			while (prepare.MoveNext())
+			{
+				yield return null;
+			}
+			foreach (ZDO proxy in proxies)
+			{
+				// Gone since the scan: a ZDO destroyed is reset and used again.
+				if (!proxy.Valid || proxy.GetPrefab() != proxyPrefab || proxy.GetInt(ZDOVars.s_location) != key)
 				{
-					return;
+					continue;
 				}
-				RandomSpawn[] randomSpawns = Utils.GetEnabledComponentsInChildren<RandomSpawn>(asset);
-				RandomObject[] randomObjects = Utils.GetEnabledComponentsInChildren<RandomObject>(asset);
-				Room component = asset.GetComponent<Room>();
-				Vector3 origin = component.transform.position;
-				Quaternion inverse = Quaternion.Inverse(component.transform.rotation);
-				string name = room.m_prefab.Name;
-				foreach ((ZDO generatorZdo, Vector3 position, Quaternion rotation) in placed)
+				if (reading.Slow)
 				{
-					if (!generatorPrefabs.TryGetValue(generatorZdo.GetPrefab(), out DungeonGenerator generator))
+					yield return null;
+					if (!proxy.Valid || proxy.GetPrefab() != proxyPrefab || proxy.GetInt(ZDOVars.s_location) != key)
 					{
 						continue;
 					}
-					Vector3 seedPosition = generator.m_useCustomInteriorTransform ? position - generatorZdo.GetPosition() : position;
-					int seed = (int)seedPosition.x * 4271 + (int)seedPosition.y * 9187 + (int)seedPosition.z * 2134;
-					if (generator.m_addBaseSeedToRandomSpawn)
-					{
-						seed += GeneratorSeed(generatorZdo.GetPosition());
-					}
-					bool[] spawned = new bool[templates.Count];
-					List<ZNetView>[] supportsSpawned = new List<ZNetView>[templates.Count];
-					try
-					{
-						foreach (RandomSpawn randomSpawn in randomSpawns)
-						{
-							randomSpawn.Prepare();
-						}
-						UnityEngine.Random.InitState(seed);
-						foreach (RandomSpawn randomSpawn in randomSpawns)
-						{
-							randomSpawn.Randomize(position + rotation * (inverse * (randomSpawn.gameObject.transform.position - origin)), null, generator);
-						}
-						foreach (RandomObject randomObject in randomObjects)
-						{
-							randomObject.Randomize(position + rotation * (inverse * (randomObject.gameObject.transform.position - origin)), null, generator);
-						}
-						for (int i = 0; i < templates.Count; i++)
-						{
-							spawned[i] = templates[i].view.gameObject.activeSelf;
-							supportsSpawned[i] = templates[i].supports.Where(v => v.gameObject.activeSelf).ToList();
-						}
-					}
-					finally
-					{
-						Restore(randomSpawns, randomObjects, views);
-					}
-					Source source = new Source { name = name, position = position, anchor = generatorZdo.GetPosition(), generator = generatorZdo.GetPrefab() };
-					for (int i = 0; i < templates.Count; i++)
-					{
-						if (spawned[i])
-						{
-							string prefabName = Utils.GetPrefabName(templates[i].view.gameObject);
-							Vector3 at = position + rotation * (inverse * (templates[i].local - origin));
-							source.slots.Add(new Slot
-							{
-								prefab = prefabName.GetStableHashCode(),
-								position = at,
-								rotation = rotation * (inverse * templates[i].rotation),
-								source = name,
-								key = Key(prefabName, at),
-								snaps = templates[i].snaps,
-								snapOffset = templates[i].snapOffset,
-								scale = templates[i].scale,
-								supports = supportsSpawned[i].Count == 0 ? null
-									: supportsSpawned[i].Select(v => (Utils.GetPrefabName(v.gameObject).GetStableHashCode(), position + rotation * (inverse * (v.transform.position - origin)))).ToList(),
-							});
-						}
-					}
-					Add(RoomKey(hash, position), source);
 				}
+				reading.at = "rolling a place";
+				Vector3 position = proxy.GetPosition();
+				Quaternion rotation = PlacedRotation(proxy);
+				string sourceKey = ProxyKey(proxy, hash);
+				bool[] spawned = new bool[templates.Count];
+				bool[][] held = new bool[templates.Count][];
+				UnityEngine.Random.State randomState = UnityEngine.Random.state;
+				AtOrigin();
+				try
+				{
+					UnityEngine.Random.InitState(proxy.GetInt(ZDOVars.s_seed));
+					foreach (RandomSpawn randomSpawn in randomSpawns)
+					{
+						randomSpawn.Randomize(position + rotation * randomSpawn.gameObject.transform.position, component);
+					}
+					foreach (RandomObject randomObject in randomObjects)
+					{
+						randomObject.Randomize(position + rotation * randomObject.gameObject.transform.position, component);
+					}
+					Read(templates, spawned, held);
+				}
+				finally
+				{
+					Restore(randomSpawns, randomObjects, views);
+					if (component)
+					{
+						component.m_biome = biome;
+					}
+					Back();
+					UnityEngine.Random.state = randomState;
+				}
+				reading.at = "a place's slots";
+				Source source = new Source { name = name, position = position, anchor = position };
+				for (int i = 0; i < templates.Count; i++)
+				{
+					if (spawned[i])
+					{
+						Template template = templates[i];
+						Vector3 at = position + rotation * template.local;
+						source.slots.Add(new Slot
+						{
+							prefab = template.prefab,
+							position = at,
+							rotation = rotation * template.rotation,
+							source = name,
+							key = Key(template.prefabName, at),
+							snaps = template.snaps,
+							snapOffset = template.snapOffset,
+							scale = template.scale,
+							supports = Supports(template, held[i], local => position + rotation * local),
+						});
+					}
+					if (reading.Slow && i + 1 < templates.Count)
+					{
+						yield return null;
+					}
+				}
+				Add(sourceKey, source);
 			}
-			finally
+		}
+
+		// DungeonGenerator.PlaceRoom, Full mode, without instantiating anything; over frames as ReplayLocation.
+		private IEnumerator ReplayRooms(int hash, bool listed, DungeonDB.RoomData room, List<(ZDO generator, Vector3 position, Quaternion rotation)> placed, Reading reading)
+		{
+			GameObject asset = room.m_prefab.Asset;
+			ZNetView[] views = Utils.GetEnabledComponentsInChildren<ZNetView>(asset);
+			List<Template> templates = new List<Template>();
+			IEnumerator parts = ReadTemplates(views, listed, templates, reading, null, null);
+			while (parts.MoveNext())
 			{
-				UnityEngine.Random.state = randomState;
+				yield return null;
+			}
+			roomHasSlots[(hash, listed)] = templates.Count > 0;
+			if (templates.Count == 0)
+			{
+				yield break;
+			}
+			RandomSpawn[] randomSpawns = Utils.GetEnabledComponentsInChildren<RandomSpawn>(asset);
+			RandomObject[] randomObjects = Utils.GetEnabledComponentsInChildren<RandomObject>(asset);
+			Room component = asset.GetComponent<Room>();
+			Vector3 origin = component.transform.position;
+			Quaternion inverse = Quaternion.Inverse(component.transform.rotation);
+			string name = room.m_prefab.Name;
+			IEnumerator prepare = Prepare(randomSpawns, reading);
+			while (prepare.MoveNext())
+			{
+				yield return null;
+			}
+			foreach ((ZDO generatorZdo, Vector3 position, Quaternion rotation) in placed)
+			{
+				if (reading.Slow)
+				{
+					yield return null;
+				}
+				reading.at = "rolling a place";
+				// Gone since the scan: a ZDO destroyed is reset and used again.
+				if (!generatorZdo.Valid || !generatorPrefabs.TryGetValue(generatorZdo.GetPrefab(), out DungeonGenerator generator))
+				{
+					continue;
+				}
+				Vector3 seedPosition = generator.m_useCustomInteriorTransform ? position - generatorZdo.GetPosition() : position;
+				int seed = (int)seedPosition.x * 4271 + (int)seedPosition.y * 9187 + (int)seedPosition.z * 2134;
+				if (generator.m_addBaseSeedToRandomSpawn)
+				{
+					seed += GeneratorSeed(generatorZdo.GetPosition());
+				}
+				Source source = new Source { name = name, position = position, anchor = generatorZdo.GetPosition(), generator = generatorZdo.GetPrefab() };
+				bool[] spawned = new bool[templates.Count];
+				bool[][] held = new bool[templates.Count][];
+				UnityEngine.Random.State randomState = UnityEngine.Random.state;
+				try
+				{
+					UnityEngine.Random.InitState(seed);
+					foreach (RandomSpawn randomSpawn in randomSpawns)
+					{
+						randomSpawn.Randomize(position + rotation * (inverse * (randomSpawn.gameObject.transform.position - origin)), null, generator);
+					}
+					foreach (RandomObject randomObject in randomObjects)
+					{
+						randomObject.Randomize(position + rotation * (inverse * (randomObject.gameObject.transform.position - origin)), null, generator);
+					}
+					Read(templates, spawned, held);
+				}
+				finally
+				{
+					Restore(randomSpawns, randomObjects, views);
+					UnityEngine.Random.state = randomState;
+				}
+				reading.at = "a place's slots";
+				for (int i = 0; i < templates.Count; i++)
+				{
+					if (spawned[i])
+					{
+						Template template = templates[i];
+						Vector3 at = position + rotation * (inverse * (template.local - origin));
+						source.slots.Add(new Slot
+						{
+							prefab = template.prefab,
+							position = at,
+							rotation = rotation * (inverse * template.rotation),
+							source = name,
+							key = Key(template.prefabName, at),
+							snaps = template.snaps,
+							snapOffset = template.snapOffset,
+							scale = template.scale,
+							supports = Supports(template, held[i], local => position + rotation * (inverse * (local - origin))),
+						});
+					}
+					if (reading.Slow && i + 1 < templates.Count)
+					{
+						yield return null;
+					}
+				}
+				Add(RoomKey(hash, position), source);
 			}
 		}
 
@@ -912,7 +1112,11 @@ namespace ResourceRegrowth
 			}
 			foreach (ZNetView view in views)
 			{
-				view.gameObject.SetActive(true);
+				// Only what a roll took down: the same, without a call into the engine for each of the thousands that stayed.
+				if (!view.gameObject.activeSelf)
+				{
+					view.gameObject.SetActive(true);
+				}
 			}
 		}
 
