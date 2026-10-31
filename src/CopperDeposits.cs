@@ -24,6 +24,11 @@ namespace ResourceRegrowth
 		player's game may have loaded (Loaded; it waits for a later pass): a broken-open one too, its pieces coming up out of the player's pit. One
 		in a zone generated now is raised in the same frame (ZoneSystem.SpawnZone), before anyone is sent it. One within BuildRadius of a
 		building when it would move, up or down, is kept, and not moved again: the building may stand on it.
+
+		FollowSlope (0.9.3, with OverDeepestHole on) tilts a deposit to lie along the slope it stands on, at most that many degrees: the game
+		stands it upright, so on a slope the rock stands out downhill and is sunk uphill (on that copy, 20-30 degrees, 78 and 43 per cent of its
+		pieces' length over the ground). It turns about its root, then rises by what it needs (CopperReach.Measure). The turn the game gave it is
+		kept (TurnHash), so another FollowSlope, 0 or OverDeepestHole -1 stands it as it was. One broken open is not turned: a player is mining it.
 	*/
 	internal static class CopperDeposits
 	{
@@ -33,6 +38,8 @@ namespace ResourceRegrowth
 		private static readonly int KeptHash = (RegrowthPlugin.GUID + ".copperkept").GetStableHashCode();
 		private static readonly int UpHash = (RegrowthPlugin.GUID + ".copperup").GetStableHashCode();
 		private static readonly int MeasuredHash = (RegrowthPlugin.GUID + ".coppermeasured").GetStableHashCode();
+		// A deposit FollowSlope turned: the turn the game gave it (Euler angles).
+		private static readonly int TurnHash = (RegrowthPlugin.GUID + ".copperturn").GetStableHashCode();
 		private static readonly Dictionary<ZoneSystem.ZoneVegetation, float> gameOffsets = new Dictionary<ZoneSystem.ZoneVegetation, float>();
 		private static readonly Queue<ZDOID> queue = new Queue<ZDOID>();
 		private static Batch batch;
@@ -48,12 +55,12 @@ namespace ResourceRegrowth
 
 		private sealed class Batch
 		{
-			public float margin;
+			public float margin, tilt;
 			public int stamp;
 			public bool dryRun;
-			public int measured, enough, kept, postponed, failed, byLocation, bounded, frames, waitedFrames;
+			public int measured, enough, kept, postponed, failed, byLocation, bounded, frames, waitedFrames, upright;
 			public double workMilliseconds, worstMilliseconds;
-			public readonly List<float> up = new List<float>(), down = new List<float>();
+			public readonly List<float> up = new List<float>(), down = new List<float>(), tilted = new List<float>();
 		}
 
 		/*
@@ -74,8 +81,8 @@ namespace ResourceRegrowth
 				CopperReach.AskAll();
 			}
 			// A batch measured for another setting is of no use: the next scan queues what the new one needs.
-			float margin = settings.CopperOverDeepestHole.Value;
-			if (batch != null && (batch.margin != margin || batch.dryRun != settings.DryRun.Value || batch.stamp != Stamp(margin, state.CopperRaised)))
+			float margin = settings.CopperOverDeepestHole.Value, tilt = Tilt(settings);
+			if (batch != null && (batch.margin != margin || batch.tilt != tilt || batch.dryRun != settings.DryRun.Value || batch.stamp != Stamp(margin, state.CopperRaised, tilt)))
 			{
 				RegrowthPlugin.Log.LogInfo($"Copper deposits over the deepest hole: the setting changed with {queue.Count} deposit(s) of the batch still to do; what is done stays, the rest is measured for the new one.");
 				Report(batch);
@@ -164,21 +171,43 @@ namespace ResourceRegrowth
 			return true;
 		}
 
-		private static void Move(ZDO zdo, Vector3 at)
+		// turn: Euler angles exactly as given (CopperReach.Measure makes them those the world's save keeps), or null to keep its turn.
+		private static void Move(ZDO zdo, Vector3 at, Vector3? turn = null)
 		{
 			zdo.SetOwner(ZDOMan.GetSessionID());
 			ZNetView view = ZNetScene.instance.FindInstance(zdo);
 			if (view)
 			{
 				view.transform.position = at;
+				if (turn.HasValue)
+				{
+					view.transform.rotation = Quaternion.Euler(turn.Value);
+				}
 			}
 			zdo.SetPosition(at);
+			// Not SetRotation: it keeps the Euler angles a quaternion gives back, which the save may round down another half degree.
+			if (turn.HasValue && zdo.m_rotation != turn.Value)
+			{
+				zdo.m_rotation = turn.Value;
+				zdo.IncreaseDataRevision();
+			}
 		}
 
-		// What a deposit was measured for: the margin, the height RaiseMeters gave it, and how it was measured.
-		private static int Stamp(float margin, float raised)
+		// What a deposit was measured for: the margin, the height RaiseMeters gave it, the slope it may follow, and how it was measured.
+		private static int Stamp(float margin, float raised, float tilt)
 		{
-			return $"3 {margin:0.###} {raised:0.###}".GetStableHashCode();
+			return (tilt > 0f ? $"4 {margin:0.###} {raised:0.###} {tilt:0.###}" : $"3 {margin:0.###} {raised:0.###}").GetStableHashCode();
+		}
+
+		private static float Tilt(Settings settings)
+		{
+			return Mathf.Clamp(settings.CopperFollowSlope.Value, 0f, 45f);
+		}
+
+		// The turn the game gave a deposit: the one FollowSlope kept, or its own (one broken open is never turned).
+		private static Vector3 Upright(ZDO zdo)
+		{
+			return zdo.GetPrefab() == CopperReach.WholeHash ? zdo.GetVec3(TurnHash, zdo.m_rotation) : zdo.m_rotation;
 		}
 
 		public static bool IsDeposit(int prefab)
@@ -214,7 +243,8 @@ namespace ResourceRegrowth
 				builds = pieces;
 				return;
 			}
-			int stamp = Stamp(margin, state.CopperRaised);
+			float tilt = Tilt(settings);
+			int stamp = Stamp(margin, state.CopperRaised, tilt);
 			bool dryRun = settings.DryRun.Value;
 			if (!dryRun || dryStamp != stamp)
 			{
@@ -228,14 +258,14 @@ namespace ResourceRegrowth
 				{
 					continue;
 				}
-				if (margin >= 0f || zdo.GetFloat(UpHash) != 0f)
+				if (margin >= 0f || zdo.GetFloat(UpHash) != 0f || Upright(zdo) != zdo.m_rotation)
 				{
 					queue.Enqueue(id);
 				}
 			}
 			if (queue.Count > 0)
 			{
-				batch = new Batch { margin = margin, stamp = stamp, dryRun = dryRun };
+				batch = new Batch { margin = margin, tilt = tilt, stamp = stamp, dryRun = dryRun };
 				builds = pieces;
 			}
 		}
@@ -324,10 +354,12 @@ namespace ResourceRegrowth
 				batch.postponed++;
 				return true;
 			}
-			float up = zdo.GetFloat(UpHash, 0f), target = 0f;
+			float up = zdo.GetFloat(UpHash, 0f), target = 0f, tilted = 0f;
+			Vector3 now = zdo.m_rotation, upright = Upright(zdo), turn = upright;
+			bool whole = zdo.GetPrefab() == CopperReach.WholeHash;
 			if (batch.margin >= 0f)
 			{
-				CopperReach.Result result = CopperReach.Measure(zdo, batch.margin, up, out float need, out bool byLocation);
+				CopperReach.Result result = CopperReach.Measure(zdo, batch.margin, up, whole ? batch.tilt : 0f, upright, out float need, out bool byLocation, out turn, out tilted);
 				if (result == CopperReach.Result.Waiting)
 				{
 					return false;
@@ -349,7 +381,8 @@ namespace ResourceRegrowth
 				target = Mathf.Max(0f, need);
 			}
 			float delta = target - up;
-			if (Mathf.Abs(delta) < 0.01f)
+			bool turning = turn != now;
+			if (Mathf.Abs(delta) < 0.01f && !turning)
 			{
 				batch.enough++;
 				Done(zdo);
@@ -366,12 +399,30 @@ namespace ResourceRegrowth
 				Done(zdo);
 				return true;
 			}
-			(delta > 0f ? batch.up : batch.down).Add(Mathf.Abs(delta));
+			if (Mathf.Abs(delta) >= 0.01f)
+			{
+				(delta > 0f ? batch.up : batch.down).Add(Mathf.Abs(delta));
+			}
+			if (turning)
+			{
+				if (tilted > 0f)
+				{
+					batch.tilted.Add(tilted);
+				}
+				else
+				{
+					batch.upright++;
+				}
+			}
 			if (!batch.dryRun)
 			{
 				at.y += delta;
-				Move(zdo, at);
+				Move(zdo, at, turning ? turn : (Vector3?)null);
 				zdo.Set(UpHash, target);
+				if (turning && whole)
+				{
+					zdo.Set(TurnHash, upright);
+				}
 			}
 			Done(zdo);
 			return true;
@@ -413,14 +464,15 @@ namespace ResourceRegrowth
 		private static void Report(Batch b)
 		{
 			string verb = b.dryRun ? " would be" : "";
-			string Spread(List<float> list)
+			string Spread(List<float> list, string unit = " m")
 			{
 				list.Sort();
-				return list.Count == 0 ? "" : $" by {list[0]:0.0}–{list[list.Count - 1]:0.0} m, median {list[list.Count / 2]:0.0}";
+				return list.Count == 0 ? "" : $" by {list[0]:0.0}–{list[list.Count - 1]:0.0}{unit}, median {list[list.Count / 2]:0.0}";
 			}
 			RegrowthPlugin.Log.LogInfo(
 				(b.dryRun ? "Dry run: " : "") + $"Copper deposits over the deepest hole ({(b.margin >= 0f ? $"{b.margin:0.##} m" : "off")}, CopperDeposits OverDeepestHole): "
 				+ $"{b.measured} measured, {b.up.Count}{verb} raised{Spread(b.up)}, {b.down.Count}{verb} lowered back{Spread(b.down)}, {b.enough} high enough"
+				+ (b.tilt > 0f || b.tilted.Count > 0 || b.upright > 0 ? $", {b.tilted.Count}{verb} tilted to the slope (at most {b.tilt:0} degrees, CopperDeposits FollowSlope){Spread(b.tilted, " degrees")}" + (b.upright > 0 ? $", {b.upright}{verb} stood as the game turned them" : "") : "")
 				+ $"; {b.byLocation} on ground a location levels" + (b.bounded > 0 ? $" ({b.bounded} by locations in too many turns to pair, at the highest each can leave)" : "")
 				+ $", {b.kept} left for a player's building within {BuildRadius:0} m"
 				+ (b.postponed > 0 ? $", {b.postponed} a player has loaded (at a later pass)" : "")
@@ -456,26 +508,33 @@ namespace ResourceRegrowth
 				return;
 			}
 			System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
-			int stamp = Stamp(margin, currentState.CopperRaised);
+			float tilt = Tilt(settings);
+			int stamp = Stamp(margin, currentState.CopperRaised, tilt);
 			List<string> done = new List<string>();
 			foreach (ZDO zdo in deposits)
 			{
-				CopperReach.Result result = CopperReach.Measure(zdo, margin, 0f, out float need, out bool byLocation);
+				Vector3 upright = zdo.m_rotation;
+				CopperReach.Result result = CopperReach.Measure(zdo, margin, 0f, tilt, upright, out float need, out bool byLocation, out Vector3 turn, out float tilted);
 				if (result != CopperReach.Result.Measured)
 				{
 					done.Add(result == CopperReach.Result.Waiting ? "at a later pass (a location near is still being read)" : "not measured");
 					continue;
 				}
 				float target = Mathf.Max(0f, need);
-				if (target >= 0.01f)
+				bool turning = turn != upright;
+				if (target >= 0.01f || turning)
 				{
 					Vector3 at = zdo.GetPosition();
 					at.y += target;
-					Move(zdo, at);
+					Move(zdo, at, turning ? turn : (Vector3?)null);
 					zdo.Set(UpHash, target);
+					if (turning)
+					{
+						zdo.Set(TurnHash, upright);
+					}
 				}
 				zdo.Set(MeasuredHash, stamp);
-				done.Add((target >= 0.01f ? $"{target:0.0} m" : "none") + (byLocation ? CopperReach.LastBound ? " (on ground a location levels, in too many turns to pair)" : " (on ground a location levels)" : ""));
+				done.Add((target >= 0.01f ? $"{target:0.0} m" : "none") + (turning ? $", tilted {tilted:0} degrees" : "") + (byLocation ? CopperReach.LastBound ? " (on ground a location levels, in too many turns to pair)" : " (on ground a location levels)" : ""));
 			}
 			CopperReach.Forget();
 			RegrowthPlugin.Log.LogInfo($"Copper deposits in the new zone {zone.x},{zone.y}, raised by what each needs for every piece to reach {margin:0.##} m over the deepest hole: {string.Join(", ", done)} ({watch.Elapsed.TotalMilliseconds:0.0} ms).");

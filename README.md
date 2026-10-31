@@ -223,6 +223,24 @@ building stays where it is, whatever the setting. The setting is read at every p
 server starts. Back at -1, each deposit goes down by what this raised it, to the height `RaiseMeters` gives it; one broken open
 since stays where it is.
 
+`FollowSlope` (with `OverDeepestHole` on) lays a deposit along the slope it stands on. The game stands copper upright, on slopes
+of 5 to 45 degrees, so its top is level: on a slope the uphill side sinks into the ground and the downhill side stands tall,
+its underside bare. With `FollowSlope = 30`, each deposit is tilted until its up is the ground's (a plane fitted to the ground
+under it, as the deposit's floor is measured), at most 30 degrees, keeping the few degrees the game tilted it itself on top,
+and then raised by what it needs as above. On ground flatter than 2 degrees it stays as the game turned it, and so does one
+broken open. On a copy of the live world, the 170 deposits on slopes of 20 to 32 degrees:
+
+| | Tallest pieces over the ground, uphill third / downhill third (median) |
+|---|---|
+| upright, `OverDeepestHole = 0.5` | 4.4 m / 8.7 m |
+| and `FollowSlope = 30` | 5.7 m / 7.4 m |
+
+Of 481 deposits, 474 were tilted (2.5 to 30 degrees, a median 14), and needing less once tilted, 201 went down by a median 0.5
+m while 267 went up by as much; 30 zones generated during the test got their deposits tilted as they were generated. Checked
+against the floor the game builds itself as above, none was short, before or after the save was loaded back, and mining them
+through the game's physics left no piece. It took 1.3 s of work over 243 frames, the worst 12 ms. Back at 0, every deposit stands
+again as the game turned it, within 0.07 m of its old height. The turn is stored to the half degree, as the game's save keeps it.
+
 ### Buildings of a camp or village
 
 The walls, poles, roofs and stairs of a Fuling village, camp or stone tower are location objects too. Listed in
@@ -420,6 +438,7 @@ without a restart (a list read again is said in the log); `Enabled`, the switche
 | LocationObjects | Locations / LocationsExclude | | locations whose every breakable part is put back, `*` matching any run of characters; prefabs that never are (see Whole locations; needs a restart) |
 | CopperDeposits | RaiseMeters | 0 | metres higher than the game puts copper deposits, up to 8 (see Copper deposits); back to 0 puts them back |
 | CopperDeposits | OverDeepestHole | -1 | raise each copper deposit further, until every piece of it reaches this many metres over the deepest pit a pickaxe can dig (up to 4; 0.5 recommended); -1 = off, and what it raised goes back down |
+| CopperDeposits | FollowSlope | 0 | with `OverDeepestHole` on: the most degrees a copper deposit is tilted to lie along its slope (up to 45; 30 recommended); 0 = upright as the game stands it, and what it tilted stands back up |
 | Zones | Enabled | false | generate visited zones again as the world first made them (needs a restart) |
 | Zones | DryRun | true | only log which zones would be generated again |
 | Zones | IdleHours | 72 | real hours with nobody near before a zone is generated again |

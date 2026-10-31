@@ -17,7 +17,7 @@ namespace ResourceRegrowth
 	{
 		public const string GUID = "sarkasticeu.resource_regrowth";
 		public const string PluginName = "Sarkastic.gg Resource Regrowth";
-		public const string PluginVersion = "0.9.2";
+		public const string PluginVersion = "0.9.3";
 
 		internal static ManualLogSource Log;
 		// Whether ZoneSystem.SpawnLocation is patched for zone resets (only at startup, with Zones on), or failed to be.

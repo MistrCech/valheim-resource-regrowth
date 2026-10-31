@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.9.3] - 2026-10-31
+
+### Added
+
+- `[CopperDeposits] FollowSlope` (default 0, off; needs `OverDeepestHole` on): a copper deposit tilted to lie along its slope,
+  at most this many degrees. The game stands copper upright on slopes of up to 45 degrees, so the uphill side sank into the
+  ground and the downhill side stood tall, its underside bare. Each deposit is turned until its up is the ground's (a plane
+  fitted to the ground under it), keeping the game's own few degrees of tilt on top, and then raised by what it needs for every
+  piece to reach the deepest pit, as before; on ground flatter than 2 degrees, and broken open, it stays as the game turned it.
+  At 30 on a copy of the live world: 474 of 481 deposits tilted 2.5-30 degrees, a median 14; on slopes of 20-32 degrees the
+  tallest pieces stand a median 5.7 m over the ground on the uphill third and 7.4 m on the downhill third, instead of 4.4 and
+  8.7. None short of the deepest pit, before or after the save was loaded back, nothing left after mining through the game's
+  physics, 30 zones generated then tilted as generated; 1.3 s of work over 243 frames, the worst 12 ms. Back at 0 every deposit
+  stands as the game turned it, within 0.07 m of its old height; at 0 nothing else changes from 0.9.2.
+
 ## [0.9.2] - 2026-10-31
 
 ### Changed

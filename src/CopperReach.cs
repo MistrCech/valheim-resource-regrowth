@@ -47,6 +47,9 @@ namespace ResourceRegrowth
 		// (a test sets it lower). More is taken at the highest each can be.
 		private static int exactWork = 256;
 		private const int MaxCachedVertices = 1 << 18;
+		// FollowSlope leaves a deposit as the game turned it on ground flatter than this, in degrees. The game places copper on slopes of 5 to 45
+		// degrees and tilts it at random by up to 5 itself (ZoneVegetation m_minTilt, m_maxTilt, m_randTilt); FollowSlope keeps that tilt on top.
+		public const float MinTilt = 2f;
 
 		public enum Result { Measured, Waiting, Failed }
 
@@ -199,12 +202,19 @@ namespace ResourceRegrowth
 			need: how much higher than `up` under its place now the deposit must stand for each of its live pieces to reach `margin` over the
 			deepest hole (negative: that much less would do). byLocation: a location's own ground counted. Waiting: a location near is still
 			being read. Failed: nothing to measure, or a location near could not be read.
+			turn: the turn it is measured in and is to stand in. With maxTilt 0, `upright` (the deposit's own as the game placed it), measured as it
+			is and as the world's save brings it back. Over 0, tilted from `upright` to lie along the ground under it (FollowSlope): the plane that
+			fits the ground's vertices within the rock's reach of its root, the ground as the floor counts it, the locations' levelling included;
+			by at most maxTilt degrees, and not at all for a slope under MinTilt. Its Euler angles are then those the save keeps (half degrees),
+			so the save brings back the very same turn. tilted: the degrees it is tilted by.
 		*/
-		public static Result Measure(ZDO zdo, float margin, float up, out float need, out bool byLocation)
+		public static Result Measure(ZDO zdo, float margin, float up, float maxTilt, Vector3 upright, out float need, out bool byLocation, out Vector3 turn, out float tilted)
 		{
 			need = 0f;
 			byLocation = false;
 			LastBound = false;
+			turn = upright;
+			tilted = 0f;
 			if (!Ready())
 			{
 				return Result.Failed;
@@ -217,20 +227,64 @@ namespace ResourceRegrowth
 				return nearby;
 			}
 			bool fractured = zdo.GetPrefab() == FracturedHash;
-			// Its turn as the game has it now and as the world's save brings it back: each piece must reach in both.
-			Vector3 euler = zdo.m_rotation, saved = Saved(euler);
 			Vector3 size = zdo.GetVec3(ZDOVars.s_scaleHash, Vector3.zero);
 			if (size == Vector3.zero)
 			{
 				size = Vector3.one * zdo.GetFloat(ZDOVars.s_scaleScalarHash, fractured ? fracturedScale : wholeScale);
 			}
 			float[] health = fractured ? Health(zdo) : null;
+			float[] floor = null;
+			int x0 = 0, z0 = 0, nx = 0, nz = 0;
+			float minX, maxX, minZ, maxZ;
+			if (maxTilt > 0f)
+			{
+				// The ground under the whole rock standing upright, every piece: the slope it lies on.
+				Quaternion standing = Quaternion.Euler(upright);
+				minX = minZ = float.MaxValue;
+				maxX = maxZ = float.MinValue;
+				float reach = 0f;
+				foreach (Vector3[] piece in pieces)
+				{
+					foreach (Vector3 v in piece)
+					{
+						Vector3 w = position + standing * Vector3.Scale(size, v);
+						minX = Mathf.Min(minX, w.x);
+						maxX = Mathf.Max(maxX, w.x);
+						minZ = Mathf.Min(minZ, w.z);
+						maxZ = Mathf.Max(maxZ, w.z);
+						reach = Mathf.Max(reach, (w.x - position.x) * (w.x - position.x) + (w.z - position.z) * (w.z - position.z));
+					}
+				}
+				floor = Floor(minX, maxX, minZ, maxZ, out x0, out z0, out nx, out nz, ref byLocation);
+				if (floor == null)
+				{
+					return Result.Failed;
+				}
+				Vector3 normal = Slope(floor, x0, z0, nx, nz, position, Mathf.Sqrt(reach));
+				float angle = Vector3.Angle(Vector3.up, normal);
+				if (angle >= MinTilt)
+				{
+					if (angle > maxTilt)
+					{
+						normal = Quaternion.AngleAxis(maxTilt, Vector3.Cross(Vector3.up, normal).normalized) * Vector3.up;
+					}
+					Vector3 euler = Saved((Quaternion.FromToRotation(Vector3.up, normal) * standing).eulerAngles);
+					if (Quaternion.Angle(Quaternion.Euler(euler), standing) >= MinTilt * 0.5f)
+					{
+						turn = euler;
+						tilted = Mathf.Min(angle, maxTilt);
+					}
+				}
+			}
+			// Its turn as the game has it now and as the world's save brings it back: each piece must reach in both.
+			Vector3 saved = Saved(turn);
 			world.Clear();
 			ends.Clear();
-			float minX = float.MaxValue, maxX = float.MinValue, minZ = float.MaxValue, maxZ = float.MinValue;
-			for (int turn = 0; turn < (saved == euler ? 1 : 2); turn++)
+			minX = minZ = float.MaxValue;
+			maxX = maxZ = float.MinValue;
+			for (int t = 0; t < (saved == turn ? 1 : 2); t++)
 			{
-				Quaternion rotation = Quaternion.Euler(turn == 0 ? euler : saved);
+				Quaternion rotation = Quaternion.Euler(t == 0 ? turn : saved);
 				for (int a = 0; a < pieces.Count; a++)
 				{
 					if (health != null && a < health.Length && health[a] <= 0f)
@@ -253,22 +307,16 @@ namespace ResourceRegrowth
 			{
 				return Result.Failed;
 			}
-			// The ground's vertices under the deposit, one more each way.
-			int x0 = Mathf.FloorToInt(minX) - 1, z0 = Mathf.FloorToInt(minZ) - 1;
-			int nx = Mathf.CeilToInt(maxX) + 2 - x0, nz = Mathf.CeilToInt(maxZ) + 2 - z0;
-			float[] raw = new float[nx * nz];
-			for (int i = 0; i < nz; i++)
+			// The ground's vertices under the deposit, one more each way (the slope's ground, if it holds them all).
+			if (floor == null || Mathf.FloorToInt(minX) - 1 < x0 || Mathf.FloorToInt(minZ) - 1 < z0 || Mathf.CeilToInt(maxX) + 2 - x0 > nx || Mathf.CeilToInt(maxZ) + 2 - z0 > nz)
 			{
-				for (int j = 0; j < nx; j++)
+				if (floor != null)
 				{
-					raw[i * nx + j] = Vertex(x0 + j, z0 + i);
+					// Levelled leaves out the locations that reach none of the last grid: this one may be wider.
+					Near(position);
 				}
-			}
-			float[] floor = Levelled(raw, x0, z0, nx, nz, out byLocation);
-			foreach (float h in floor)
-			{
-				// A modifier the game itself could not apply (a smooth of no radius, another mod's): nothing is moved by it.
-				if (float.IsNaN(h) || float.IsInfinity(h))
+				floor = Floor(minX, maxX, minZ, maxZ, out x0, out z0, out nx, out nz, ref byLocation);
+				if (floor == null)
 				{
 					return Result.Failed;
 				}
@@ -287,6 +335,70 @@ namespace ResourceRegrowth
 				start = end;
 			}
 			return Result.Measured;
+		}
+
+		// The ground's vertices from minX/minZ to maxX/maxZ and one more each way, levelled by the locations near (Near first); null where a
+		// modifier the game itself could not apply (a smooth of no radius, another mod's) would leave no height: nothing is moved by it.
+		private static float[] Floor(float minX, float maxX, float minZ, float maxZ, out int x0, out int z0, out int nx, out int nz, ref bool byLocation)
+		{
+			x0 = Mathf.FloorToInt(minX) - 1;
+			z0 = Mathf.FloorToInt(minZ) - 1;
+			nx = Mathf.CeilToInt(maxX) + 2 - x0;
+			nz = Mathf.CeilToInt(maxZ) + 2 - z0;
+			float[] raw = new float[nx * nz];
+			for (int i = 0; i < nz; i++)
+			{
+				for (int j = 0; j < nx; j++)
+				{
+					raw[i * nx + j] = Vertex(x0 + j, z0 + i);
+				}
+			}
+			float[] floor = Levelled(raw, x0, z0, nx, nz, out bool levelled);
+			byLocation |= levelled;
+			foreach (float h in floor)
+			{
+				if (float.IsNaN(h) || float.IsInfinity(h))
+				{
+					return null;
+				}
+			}
+			return floor;
+		}
+
+		// The plane that fits the ground's vertices within `radius` of `at` across (least squares): its normal, pointing up.
+		private static Vector3 Slope(float[] floor, int x0, int z0, int nx, int nz, Vector3 at, float radius)
+		{
+			double sxx = 0, sxz = 0, szz = 0, sx = 0, sz = 0, sh = 0, sxh = 0, szh = 0;
+			int n = 0;
+			for (int i = 0; i < nz; i++)
+			{
+				for (int j = 0; j < nx; j++)
+				{
+					double x = x0 + j - (double)at.x, z = z0 + i - (double)at.z, h = floor[i * nx + j];
+					if (x * x + z * z > (double)radius * radius)
+					{
+						continue;
+					}
+					sxx += x * x;
+					sxz += x * z;
+					szz += z * z;
+					sx += x;
+					sz += z;
+					sh += h;
+					sxh += x * h;
+					szh += z * h;
+					n++;
+				}
+			}
+			// h = a x + b z + c: the normal equations, by Cramer's rule.
+			double det = sxx * (szz * n - sz * sz) - sxz * (sxz * n - sz * sx) + sx * (sxz * sz - szz * sx);
+			if (n < 3 || Math.Abs(det) < 1e-9)
+			{
+				return Vector3.up;
+			}
+			double a = (sxh * (szz * n - sz * sz) - sxz * (szh * n - sz * sh) + sx * (szh * sz - szz * sh)) / det;
+			double b = (sxx * (szh * n - sz * sh) - sxh * (sxz * n - sz * sx) + sx * (sxz * sh - szh * sx)) / det;
+			return new Vector3((float)-a, 1f, (float)-b).normalized;
 		}
 
 		private static float[] Health(ZDO zdo)
@@ -703,7 +815,7 @@ namespace ResourceRegrowth
 			}
 		}
 
-		private static Vector3 Saved(Vector3 euler)
+		public static Vector3 Saved(Vector3 euler)
 		{
 			if (euler.CloseToZero())
 			{
